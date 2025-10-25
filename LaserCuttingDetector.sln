@@ -1,0 +1,61 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36511.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadDrawPic", "CadDrawPic\CadDrawPic.csproj", "{78D948C5-73A8-421E-986F-03725F78C63A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadDataExtractor", "CadDataExtractor\CadDataExtractor.csproj", "{2EACF491-425F-4E47-B353-0312DBA9950D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionLibrary", "ImageProcessor\VisionLibrary.csproj", "{1B352D28-7307-4229-B142-CE63374C156E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DetectorTest", "DetectorTest\DetectorTest.csproj", "{DAAB56A4-5310-467E-9307-6E32DE172CA9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LaserCuttingDetector", "LaserCuttingDetector\LaserCuttingDetector.csproj", "{9862739E-8706-41C5-B038-996271AF95E5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GrpcContracts", "GrpcContracts\GrpcContracts.csproj", "{7A5BE0DA-0C5A-4206-8DE9-2298F6F1B33D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VmHelper", "VmHelper\VmHelper.csproj", "{4C462777-7678-46C8-82A9-C97F18D50E31}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{78D948C5-73A8-421E-986F-03725F78C63A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78D948C5-73A8-421E-986F-03725F78C63A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78D948C5-73A8-421E-986F-03725F78C63A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78D948C5-73A8-421E-986F-03725F78C63A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2EACF491-425F-4E47-B353-0312DBA9950D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2EACF491-425F-4E47-B353-0312DBA9950D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2EACF491-425F-4E47-B353-0312DBA9950D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2EACF491-425F-4E47-B353-0312DBA9950D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B352D28-7307-4229-B142-CE63374C156E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B352D28-7307-4229-B142-CE63374C156E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B352D28-7307-4229-B142-CE63374C156E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B352D28-7307-4229-B142-CE63374C156E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9862739E-8706-41C5-B038-996271AF95E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9862739E-8706-41C5-B038-996271AF95E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9862739E-8706-41C5-B038-996271AF95E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9862739E-8706-41C5-B038-996271AF95E5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7A5BE0DA-0C5A-4206-8DE9-2298F6F1B33D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7A5BE0DA-0C5A-4206-8DE9-2298F6F1B33D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7A5BE0DA-0C5A-4206-8DE9-2298F6F1B33D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7A5BE0DA-0C5A-4206-8DE9-2298F6F1B33D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C462777-7678-46C8-82A9-C97F18D50E31}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C462777-7678-46C8-82A9-C97F18D50E31}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C462777-7678-46C8-82A9-C97F18D50E31}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C462777-7678-46C8-82A9-C97F18D50E31}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F2D56003-7596-42CE-80F6-11ABCD6974C9}
+	EndGlobalSection
+EndGlobal

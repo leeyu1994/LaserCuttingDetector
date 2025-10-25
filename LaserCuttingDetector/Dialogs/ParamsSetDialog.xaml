@@ -1,0 +1,114 @@
+﻿<!-- 文件: LaserCuttingDetector/Dialogs/ParamSetDialog.xaml -->
+
+<dx:ThemedWindow xmlns:dxe="http://schemas.devexpress.com/winfx/2008/xaml/editors"  
+                 xmlns:dxlc="http://schemas.devexpress.com/winfx/2008/xaml/layoutcontrol"  
+                 x:Class="LaserCuttingDetector.Dialogs.ParamsSetDialog"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                 xmlns:dxmvvm="http://schemas.devexpress.com/winfx/2008/xaml/mvvm" 
+                 xmlns:dx="http://schemas.devexpress.com/winfx/2008/xaml/core"
+                 xmlns:sys="clr-namespace:System;assembly=mscorlib"
+                 mc:Ignorable="d"
+                 Width="600" Height="840"
+                 WindowStartupLocation="CenterOwner">
+
+    <!-- 注入ICurrentWindowService，以便ViewModel可以关闭窗口 -->
+
+    <DockPanel>
+        <dx:SimpleButton Content="保存并关闭" 
+                         DockPanel.Dock="Bottom" 
+                         Margin="10" 
+                         Command="{Binding SaveAndCloseCommand}"/>
+
+            <dxlc:LayoutControl Orientation="Vertical">
+                <dxlc:LayoutGroup Orientation="Vertical" Header="通用配置" View="GroupBox" >
+                    <dxlc:LayoutItem Label="像素尺寸 (mm/pixel)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.001" EditValue="{Binding Config.PixelSize}" Mask="f4" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="目标板宽度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardWidthMm}" Mask="f2" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="目标板高度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardHeightMm}" Mask="f2" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="剪裁图边框(mm)">
+                        <dxe:SpinEdit EditValue="{Binding Config.CuttingFrame}" 
+                                      MinValue="0" 
+                                      MaxValue="50" 
+                                      Increment="0.1"
+                                      IsFloatValue="True"
+                                      ToolTip="用于修正图像裁切后导致的定位坐标偏差"/>
+                    </dxlc:LayoutItem>
+            </dxlc:LayoutGroup>
+
+                <dxlc:LayoutGroup Orientation="Vertical" Header="部件检测" View="GroupBox" >
+                    <dxlc:LayoutItem Label="最大位置偏移 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.ComponentOffset}" Mask="f2" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="搜索半径 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.5" EditValue="{Binding Config.ComponentSearchRadius}" Mask="f2" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="高斯模糊核大小">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="2" EditValue="{Binding Config.BlurKernelSize}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="主部件最小面积 (pixel²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinMainComponentArea}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="子部件最小面积 (pixel²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinChildComponentArea}"/>
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+                <dxlc:LayoutGroup Orientation="Vertical" Header="桥位检测" View="GroupBox">
+                    <dxlc:LayoutItem Label="对齐偏移阈值 (pixel)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.BridgePlumbOffset}" Mask="f2" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="长度标准值 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.BridgeLocationSize}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="长度偏差 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.BridgeLengthDeviation}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="搜索半径 (pixel)">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.BridgeSearchRadius}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="路径最小面积 (pixel²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.MinBridgePathArea}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="形态学核大小">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="2" EditValue="{Binding Config.BridgeMorphKernelSize}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最小距离 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinBridgeDistance}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最大距离 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxBridgeDistance}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+                <dxlc:LayoutGroup Orientation="Vertical" Header="宽度检测" View="GroupBox" >
+                    <dxlc:LayoutItem Label="采样步长 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthSampleStep}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="合格宽度下限 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinQualifiedWidth}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="合格宽度上限 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxQualifiedWidth}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="偏移合格阈值 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthOffsetThreshold}" Mask="f3" />
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最大搜索步数">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.MaxSearchSteps}"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="邻近搜索半径 (pixel)">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.NearbySearchRadius}"/>
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+            </dxlc:LayoutControl>
+    </DockPanel>
+</dx:ThemedWindow>

@@ -1,0 +1,229 @@
+// 指定 proto3 语法
+syntax = "proto3";
+
+// 导入 google.protobuf.Timestamp 类型
+import "google/protobuf/timestamp.proto";
+
+// 定义包名，它会映射为 C# 的命名空间
+package legacy;
+
+// ===================================================================
+// 服务定义 (Service Definition)
+// ===================================================================
+
+service LegacyVisionService {
+  // RPC 1: 加载视觉方案
+  rpc LoadSolution (LoadSolutionRequest) returns (LoadSolutionResponse);
+
+  // RPC 2: 处理本地图像文件
+  rpc ProcessImageFromPath(ProcessImageFromPathRequest) returns (ProcessImageResponse);
+
+  // RPC 3: 相机初始化
+  rpc InitializeCamera(InitializeCameraRequest) returns (CameraOperationResponse);
+
+  // RPC 4: 设置相机参数
+  rpc SetCameraParameters(SetCameraParametersRequest) returns (CameraOperationResponse);
+
+  // RPC 5: 开始相机采集
+  rpc StartCameraGrab(StartCameraGrabRequest) returns (CameraOperationResponse);
+
+  // RPC 6: 停止相机采集
+  rpc StopCameraGrab(StopCameraGrabRequest) returns (CameraOperationResponse);
+
+  // RPC 7: 相机采集并处理（一步到位）
+  rpc CaptureAndProcess(CaptureAndProcessRequest) returns (ProcessImageResponse);
+
+  // RPC 8: 获取相机状态
+  rpc GetCameraStatus(GetCameraStatusRequest) returns (GetCameraStatusResponse);
+
+  // RPC 9: 释放相机资源
+  rpc ReleaseCamera(ReleaseCameraRequest) returns (CameraOperationResponse);
+
+  // RPC 10: 使用流式传输来采集并处理大图像
+  rpc CaptureAndProcessStreamed(CaptureAndProcessRequest) returns (stream StreamedProcessImageResponse);
+  
+  // RPC 11: 使用流式传输来处理本地大图像文件
+  rpc ProcessImageFromPathStreamed(ProcessImageFromPathRequest) returns (stream StreamedProcessImageResponse);
+
+  // RPC 12: 开始持续采集并以流式传输结果
+  rpc StartGrabbingAndProcessingStreamed(StartGrabbingStreamRequest) returns (stream StreamedProcessImageResponse);
+
+  // RPC 13: 启动相机，监听外部硬件触发信号，并将每次触发采集的图像处理结果以流式传输
+  rpc ProcessTriggeredImagesStreamed(StartGrabbingStreamRequest) returns (stream StreamedProcessImageResponse);
+}
+
+// ===================================================================
+// 消息定义 (Message Definitions)
+// ===================================================================
+
+// --- 用于定义坐标点 ---
+message Point2D {
+  float x = 1;
+  float y = 2;
+}
+
+// --- 通用响应 ---
+message BaseResponse {
+  bool success = 1;
+  string message = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// --- 用于加载方案的 RPC ---
+message LoadSolutionRequest {
+  string solution_name = 1; // 要加载的方案名称或完整路径
+}
+
+message LoadSolutionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// --- 用于处理本地图像文件的 RPC ---
+message ProcessImageFromPathRequest {
+  string image_path = 1;        // 图像文件的完整路径
+  string operation_id = 2;      // 可选的操作ID，用于日志追踪
+}
+
+// --- 相机相关的消息定义 ---
+
+// 相机初始化请求
+message InitializeCameraRequest {
+  string config_file_path = 1;  // 相机配置文件路径（可选）
+  int32 camera_type = 2;         // 相机类型枚举
+  int32 baudrate = 3;            // 波特率
+  string operation_id = 4;       // 操作ID
+}
+
+// 相机参数设置请求
+message SetCameraParametersRequest {
+  // 光源设置
+  optional int32 red_light_intensity = 1;
+  optional int32 green_light_intensity = 2;
+  optional int32 blue_light_intensity = 3;
+  
+  // 采集参数
+  optional int32 frame_height = 4;
+  optional int32 line_frequency = 5;
+  optional int32 line_sync_source = 6;
+  optional bool correction_enabled = 7;
+  
+  // 其他参数
+  optional float multiplier = 8;
+  optional int32 shaft_encoder_direction = 9;
+  optional int32 external_line_trigger = 10;
+  
+  string operation_id = 11;
+}
+
+// 开始采集请求
+message StartCameraGrabRequest {
+  bool continuous_mode = 1;      // 是否连续采集模式
+  int32 duration_ms = 2;         // 采集持续时间（毫秒），连续模式时忽略
+  string operation_id = 3;
+}
+
+// 停止采集请求
+message StopCameraGrabRequest {
+  string operation_id = 1;
+}
+
+// 采集并处理请求
+message CaptureAndProcessRequest {
+  bool save_image = 1;           // 是否保存采集的图像
+  string save_path = 2;          // 图像保存路径（可选）
+  int32 capture_timeout_ms = 3;  // 采集超时时间
+  string operation_id = 4;
+}
+
+// 获取相机状态请求
+message GetCameraStatusRequest {
+  string operation_id = 1;
+}
+
+// 获取相机状态响应
+message GetCameraStatusResponse {
+  bool success = 1;
+  string message = 2;
+  bool is_initialized = 3;
+  bool is_grabbing = 4;
+  int32 frame_width = 5;
+  int32 frame_height = 6;
+  int32 dpi = 7;
+  int32 red_light_intensity = 8;
+  int32 green_light_intensity = 9;
+  int32 blue_light_intensity = 10;
+  string camera_info = 11;       // 其他相机信息的JSON字符串
+}
+
+// 释放相机请求
+message ReleaseCameraRequest {
+  string operation_id = 1;
+}
+
+// 相机操作通用响应
+message CameraOperationResponse {
+  bool success = 1;
+  string message = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string operation_id = 4;
+}
+
+// 图像处理的响应（通用）
+message ProcessImageResponse {
+  bool success = 1;
+  string message = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string operation_id = 4;
+
+  // 关键结果 1: 返回检测到的四个角点坐标
+  repeated Point2D corner_points = 5;
+  
+  // 关键结果 3: 原始图像路径（如果客户端要求在服务端保存了的话）
+  string source_image_path = 7;
+
+  // 可选：统计信息
+  double process_time_seconds = 8;
+  int32 defect_count = 9;
+  string detection_summary = 10;    // 检测结果摘要的JSON字符串
+
+  // 关键结果 2: 返回处理后的图像原始数据(用于客户端分析和显示)
+  bytes output_image_data = 11; 
+}
+
+
+// ===================================================================
+// 为流式传输定义的消息 (Message Definitions for Streaming)
+// ===================================================================
+
+// 消息 1: 包含除了图像数据之外的所有元数据
+message ProcessImageMetadata {
+  bool success = 1;
+  string message = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string operation_id = 4;
+  repeated Point2D corner_points = 5;
+  string source_image_path = 7;
+  double process_time_seconds = 8;
+  int32 defect_count = 9;
+  string detection_summary = 10;
+}
+
+// 消息 2: 包含图像的一个数据块
+message ImageChunk {
+  bytes data = 1;
+}
+
+// 消息 3: 流式响应的包装器。每次响应要么是元数据（第一条消息），要么是图像块（后续消息）
+message StreamedProcessImageResponse {
+  oneof content {
+    ProcessImageMetadata metadata = 1;
+    ImageChunk chunk = 2;
+  }
+}
+
+
+// 为新的流式采集服务定义的请求消息
+message StartGrabbingStreamRequest {
+  string operation_id = 1; // 操作ID，用于日志追踪
+}

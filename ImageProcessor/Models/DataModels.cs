@@ -1,5 +1,6 @@
 ﻿using CsvHelper.Configuration.Attributes;
 using OpenCvSharp;
+using System.Collections.Generic; // 确保引入此命名空间
 
 namespace VisionLibrary.Models
 {
@@ -13,13 +14,17 @@ namespace VisionLibrary.Models
     public class CadRawData
     {
         [Name("部件ID")]
-        public string ComponentId { get; set; } = string.Empty;
+        public string? ComponentId { get; set; }
 
         [Name("对象类型")]
-        public string ObjectType { get; set; } = string.Empty;
+        public string? ObjectType { get; set; }
 
         [Name("对象句柄")]
-        public string ObjectHandle { get; set; } = string.Empty;
+        public string? ObjectHandle { get; set; }
+
+        // 【新增】为了按图层筛选，需要加上图层属性
+        [Name("图层")]
+        public string? Layer { get; set; }
 
         [Name("起点X")]
         public double? StartX { get; set; }
@@ -209,6 +214,10 @@ namespace VisionLibrary.Models
         public List<WidthSampleResult> WidthSampleResults { get; set; } = new();
         public List<AggregatedWidthDefect> AggregatedWidthDefects { get; set; } = new();
 
+        // 【新增】压痕检测的结果列表。
+        public List<IndentationResult> DetectedIndentations { get; set; } = new();
+        public List<LightTransmissionResult> LightTransmissionResults { get; set; } = new();
+
         /// <summary>
         /// 对齐后的图像，可用于UI显示或进一步分析。
         /// 注意：调用者在用完后有责任调用 .Dispose() 方法释放此Mat对象！
@@ -227,7 +236,6 @@ namespace VisionLibrary.Models
     /// </summary>
     public class IndentationResult
     {
-        // --- 原始CAD数据字段 ---
         [Name("部件ID")]
         public string ComponentId { get; set; } = string.Empty;
 
@@ -264,7 +272,6 @@ namespace VisionLibrary.Models
         [Name("总角度(°)")]
         public double? TotalAngle { get; set; }
 
-        // --- 新增的检测结果字段 ---
         [Name("中心点X")]
         public double? CenterX_Result { get; set; }
 
@@ -274,6 +281,9 @@ namespace VisionLibrary.Models
         [Name("平均灰度值")]
         public double AverageGray { get; set; }
 
+        [Name("结果")]
+        public string Result { get; set; } = "F"; // 默认为不合格 (Fail)
+
         /// <summary>
         /// 辅助方法，用于从原始CadRawData对象填充字段。
         /// </summary>
@@ -281,9 +291,9 @@ namespace VisionLibrary.Models
         {
             return new IndentationResult
             {
-                ComponentId = raw.ComponentId,
-                ObjectType = raw.ObjectType,
-                ObjectHandle = raw.ObjectHandle,
+                ComponentId = raw.ComponentId ?? "",
+                ObjectType = raw.ObjectType ?? "",
+                ObjectHandle = raw.ObjectHandle ?? "",
                 StartX = raw.StartX,
                 StartY = raw.StartY,
                 EndX = raw.EndX,

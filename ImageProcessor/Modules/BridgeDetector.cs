@@ -143,19 +143,32 @@ namespace VisionLibrary.Modules
             bool isSymmetric = plumbDistance < _config.BridgePlumbOffset;
 
             // 7. 组装结果对象
+            // 先计算出所有的测量值
+            double bridgeWidth1Mm = Math.Round(Math.Min(rects[0].Size.Width, rects[0].Size.Height) * _config.PixelSize, 3);
+            double bridgeWidth2Mm = Math.Round(Math.Min(rects[1].Size.Width, rects[1].Size.Height) * _config.PixelSize, 3);
+            double bridgeLengthFinalMm = Math.Round(bridgeLengthMm, 3); // 使用上面已计算的 bridgeLengthMm
+
+            // 新代码 (综合判断):
+            // 步骤1: 分别判断各项指标是否合格
+            bool isLengthOk = bridgeLengthFinalMm >= _config.MinBridgeLengthMm && bridgeLengthFinalMm <= _config.MaxBridgeLengthMm;
+            bool isWidth1Ok = bridgeWidth1Mm >= _config.MinBridgePathWidthMm && bridgeWidth1Mm <= _config.MaxBridgePathWidthMm;
+            bool isWidth2Ok = bridgeWidth2Mm >= _config.MinBridgePathWidthMm && bridgeWidth2Mm <= _config.MaxBridgePathWidthMm;
+
+            // 步骤2: 将所有条件进行逻辑与运算，得出最终结果
+            bool isQualified = isSymmetric && isLengthOk && isWidth1Ok && isWidth2Ok;
             return new BridgeResult
             {
                 BrID = theoryCenterPoint.Z,
-                BridgeWidth1 = Math.Round(Math.Min(rect1.Size.Width, rect1.Size.Height) * _config.PixelSize, 3),
-                BridgeWidth2 = Math.Round(Math.Min(rect2.Size.Width, rect2.Size.Height) * _config.PixelSize, 3),
-                BridgeLength = Math.Round(bridgeLengthMm, 3),
+                BridgeWidth1 = bridgeWidth1Mm, // 使用上面计算好的值
+                BridgeWidth2 = bridgeWidth2Mm, // 使用上面计算好的值
+                BridgeLength = bridgeLengthFinalMm,
                 BridgeOffset = Math.Round(bridgeOffsetPixels * _config.PixelSize, 3),
                 BridgeAngle = Math.Round(bridgeAngle, 3),
                 IsSymmetric = isSymmetric ? "T" : "F",
                 PlumbOffset = Math.Round(plumbDistance, 1),
                 BridgeCenterX = Math.Round(bridgeMidGlobal.X, 1),
                 BridgeCenterY = Math.Round(bridgeMidGlobal.Y, 1),
-                Result = isSymmetric ? "T" : "F" // 当前逻辑仅判断对称性
+                Result = isQualified ? "T" : "F" // 使用综合判断的结果
             };
         }
 

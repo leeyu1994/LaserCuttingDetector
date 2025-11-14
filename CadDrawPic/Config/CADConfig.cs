@@ -1,12 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿// CadDrawPic/Config/CADConfig.cs
 
 namespace CadDrawPic.Config
 {
-    // <summary>
+    /// <summary>
     /// CAD处理配置类
     /// </summary>
     public static class CADConfig
@@ -17,7 +13,7 @@ namespace CadDrawPic.Config
         public static readonly string OutputDir = Path.Combine(BaseDir, "output");
 
         // ====================== 文件名配置 ======================
-        public const string CAD_DATA_FILE = "PROJECT_QJ_1AMK63_001_v17_C.csv";
+        public const string CAD_DATA_FILE = "CAD_Data_Export.csv";
         public const string ACCURACY_REPORT = "accuracy_report.txt";
         public const string OUTPUT_IMAGE_NO_MARGIN = "cad_redraw_0.png";
         public const string OUTPUT_IMAGE_WITH_MARGIN = "cad_redraw_10.png";
@@ -27,14 +23,6 @@ namespace CadDrawPic.Config
         public const float LINE_WIDTH_MM = 0.1f;          // 线宽（毫米）
         public const float MARGIN_MM = 10f;               // 边距大小（毫米）
         public static readonly float DPI = 25.4f / PIXEL_SIZE; // 图像分辨率
-
-        // ====================== 固定绘图区域 ======================
-        public const float PLOT_X_MIN = 0f;
-        public const float PLOT_Y_MIN = 0f;
-        public const float PLOT_X_MAX = 215f;
-        public const float PLOT_Y_MAX = 290f;
-        public static readonly float PLOT_WIDTH = PLOT_X_MAX - PLOT_X_MIN;
-        public static readonly float PLOT_HEIGHT = PLOT_Y_MAX - PLOT_Y_MIN;
 
         // ====================== 验证参数配置 ======================
         public const float POSITION_TOLERANCE_MM = 0.5f;      // 位置误差容差（毫米）

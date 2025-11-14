@@ -408,24 +408,17 @@ namespace CadDrawPic.Services
                 return null;
             }
 
-            // 确保总角度为正
-            if (totalAngle < 0)
-            {
-                startAngle += totalAngle;
-                totalAngle = -totalAngle;
-            }
-
             var arc = new ArcElement
             {
                 Center = new PointF(centerX, centerY),
                 Radius = radius,
-                StartAngle = startAngle % 360,
-                TotalAngle = totalAngle
+                StartAngle = startAngle, // 直接使用原始数据
+                TotalAngle = totalAngle  // 直接使用原始数据，保留方向
             };
 
             arc.Length = arc.CalculateLength();
             if (rowNumber <= 3)
-                Console.WriteLine($"第{rowNumber}行: 提取圆弧: 中心({centerX:F2},{centerY:F2}), 半径: {radius:F2}");
+                Console.WriteLine($"第{rowNumber}行: 提取圆弧: 中心({centerX:F2},{centerY:F2}), 半径: {radius:F2}, 起始角度: {startAngle:F2}, 总角度: {totalAngle:F2}");
             return arc;
         }
 

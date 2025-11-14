@@ -198,6 +198,35 @@
                             </dxg:GridColumn>
                         </dxg:GridControl>
                     </dx:DXTabItem>
+
+                    <!-- 新增：压痕缺陷Tab -->
+                    <dx:DXTabItem Header="压痕缺陷">
+                        <dxg:GridControl ItemsSource="{Binding IndentationDefects}"
+                                         SelectedItem="{Binding SelectedIndentationDefect, Mode=TwoWay}">
+                            <dxg:GridControl.View>
+                                <dxg:TableView AutoWidth="True" ShowGroupPanel="False"/>
+                            </dxg:GridControl.View>
+                            <!-- 绑定到 IndentationResult 的属性 -->
+                            <dxg:GridColumn FieldName="ObjectHandle" Header="对象句柄"/>
+                            <dxg:GridColumn FieldName="ObjectType" Header="对象类型"/>
+                            <dxg:GridColumn FieldName="AverageGray" Header="平均灰度">
+                                <dxg:GridColumn.EditSettings>
+                                    <dxe:TextEditSettings DisplayFormat="F2"/>
+                                </dxg:GridColumn.EditSettings>
+                            </dxg:GridColumn>
+                            <dxg:GridColumn FieldName="Result" Header="结果"/>
+                            <dxg:GridColumn FieldName="CenterX_Result" Header="中心X(px)">
+                                <dxg:GridColumn.EditSettings>
+                                    <dxe:TextEditSettings DisplayFormat="F2"/>
+                                </dxg:GridColumn.EditSettings>
+                            </dxg:GridColumn>
+                            <dxg:GridColumn FieldName="CenterY_Result" Header="中心Y(px)">
+                                <dxg:GridColumn.EditSettings>
+                                    <dxe:TextEditSettings DisplayFormat="F2"/>
+                                </dxg:GridColumn.EditSettings>
+                            </dxg:GridColumn>
+                        </dxg:GridControl>
+                    </dx:DXTabItem>
                 </dx:DXTabControl>
             </dxlc:GroupBox>
 

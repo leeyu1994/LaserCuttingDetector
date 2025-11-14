@@ -36,12 +36,6 @@ namespace CadDataExtractor
         /// <summary>
         /// 从当前文档提取数据
         /// </summary>
-        /// <param name="doc">当前CAD文档</param>
-        /// <param name="outputCsvPath">输出CSV文件路径</param>
-        /// <param name="selectedLayers">需要提取的图层列表</param>
-        /// <param name="userOrigin">用户坐标系原点</param>
-        /// <param name="unitScale">单位缩放因子</param>
-        /// <returns>是否成功</returns>
         public bool ExtractDataFromCurrentDocument(Document doc, string outputCsvPath,
                     List<string> selectedLayers, Point3d? userOrigin = null, double unitScale = 1.0)
         {
@@ -64,7 +58,6 @@ namespace CadDataExtractor
                     return WriteToCSV(extractedData, outputCsvPath);
                 }
 
-                // 步骤 1: 【已验证正确】手动遍历所有几何点，计算100%可靠的边界框
                 double minX = double.MaxValue, minY = double.MaxValue;
                 double maxX = double.MinValue, maxY = double.MinValue;
                 foreach (var info in basicEntities)
@@ -77,7 +70,6 @@ namespace CadDataExtractor
                 double autoFitScale = 1.0;
                 Vector3d centeringOffset = Vector3d.ZAxis;
 
-                // 步骤 2: 【最终修正】如果自动适配，则计算居中和缩放参数
                 if (!userOrigin.HasValue && hasValidBounds)
                 {
                     double sourceWidth = maxX - minX;
@@ -91,11 +83,9 @@ namespace CadDataExtractor
                         double scaleY = targetHeight / sourceHeight;
                         autoFitScale = Math.Min(scaleX, scaleY);
 
-                        // 计算缩放后的尺寸
                         double scaledWidth = sourceWidth * autoFitScale;
                         double scaledHeight = sourceHeight * autoFitScale;
 
-                        // 计算居中所需的偏移量
                         double offsetX = (targetWidth - scaledWidth) / 2.0;
                         double offsetY = (targetHeight - scaledHeight) / 2.0;
                         centeringOffset = new Vector3d(offsetX, offsetY, 0);
@@ -104,7 +94,6 @@ namespace CadDataExtractor
 
                 double totalScale = unitScale * autoFitScale;
 
-                // 步骤 3: 处理实体，传入所有变换参数
                 foreach (var entityInfo in basicEntities)
                 {
                     var record = ProcessEntity(entityInfo.Entity, entityInfo.LayerName, origin, totalScale, centeringOffset);
@@ -114,37 +103,40 @@ namespace CadDataExtractor
                     }
                 }
 
+                foreach (var entityInfo in basicEntities)
+                {
+                    if (!entityInfo.Entity.ObjectId.IsValid)
+                    {
+                        entityInfo.Entity.Dispose();
+                    }
+                }
+
                 trans.Abort();
             }
 
             return WriteToCSV(extractedData, outputCsvPath);
         }
+
         /// <summary>
-        /// 辅助方法：获取单个实体的边界并更新总边界
+        /// 【编译错误修正】辅助方法：获取单个实体的边界并更新总边界
         /// </summary>
         private void GetEntityBounds(Entity entity, ref double minX, ref double minY, ref double maxX, ref double maxY)
         {
-            switch (entity)
+            // 使用 GeometricExtents 属性是获取实体精确边界框的最可靠、最标准的方法。
+            // 这个属性由 AutoCAD 内部计算，能正确处理所有类型的几何体，包括圆弧的精确边界。
+            if (entity.Bounds.HasValue) // 首先检查边界是否存在
             {
-                case Line line:
-                    minX = Math.Min(minX, line.StartPoint.X); maxX = Math.Max(maxX, line.StartPoint.X);
-                    minY = Math.Min(minY, line.StartPoint.Y); maxY = Math.Max(maxY, line.StartPoint.Y);
-                    minX = Math.Min(minX, line.EndPoint.X); maxX = Math.Max(maxX, line.EndPoint.X);
-                    minY = Math.Min(minY, line.EndPoint.Y); maxY = Math.Max(maxY, line.EndPoint.Y);
-                    break;
-                case Arc arc:
-                    minX = Math.Min(minX, arc.Center.X - arc.Radius); maxX = Math.Max(maxX, arc.Center.X + arc.Radius);
-                    minY = Math.Min(minY, arc.Center.Y - arc.Radius); maxY = Math.Max(maxY, arc.Center.Y + arc.Radius);
-                    break;
-                case Circle circle:
-                    minX = Math.Min(minX, circle.Center.X - circle.Radius); maxX = Math.Max(maxX, circle.Center.X + circle.Radius);
-                    minY = Math.Min(minY, circle.Center.Y - circle.Radius); maxY = Math.Max(maxY, circle.Center.Y + circle.Radius);
-                    break;
+                Extents3d extents = entity.GeometricExtents;
+                Point3d minPoint = extents.MinPoint;
+                Point3d maxPoint = extents.MaxPoint;
+
+                minX = Math.Min(minX, minPoint.X);
+                minY = Math.Min(minY, minPoint.Y);
+                maxX = Math.Max(maxX, maxPoint.X);
+                maxY = Math.Max(maxY, maxPoint.Y);
             }
         }
-        /// <summary>
-        /// 准备图层：确保目标图层是打开、解冻、未锁定的。
-        /// </summary>
+
         private void PrepareLayers(Database db, Transaction trans, HashSet<string> targetLayers)
         {
             var layerTable = (LayerTable)trans.GetObject(db.LayerTableId, OpenMode.ForRead);
@@ -164,10 +156,7 @@ namespace CadDataExtractor
                 }
             }
         }
-        /// <summary>
-        /// 循环处理所有复杂对象，直到模型空间中只剩下基本几何体。
-        /// 此方法恢复了对样条曲线的转换和对其他对象分解的区分处理。
-        /// </summary>
+
         private void ProcessComplexObjects(Database db, Transaction trans, HashSet<string> targetLayers)
         {
             var modelSpace = (BlockTableRecord)trans.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
@@ -176,93 +165,67 @@ namespace CadDataExtractor
             do
             {
                 changedInLoop = false;
-                var splinesToConvert = new List<ObjectId>();
-                var entitiesToExplode = new List<ObjectId>();
+                var objectsToProcess = new List<ObjectId>();
 
-                // 步骤 2.1: 遍历并分类所有需要处理的对象
                 foreach (ObjectId objId in modelSpace)
                 {
                     var entity = trans.GetObject(objId, OpenMode.ForRead) as Entity;
                     if (entity == null || entity.IsErased || !targetLayers.Contains(entity.Layer)) continue;
 
-                    // 类别 A: 样条曲线 (需要转换，而不是分解)
-                    if (entity is Spline)
+                    if (entity is BlockReference || entity is MInsertBlock || entity is Spline)
                     {
-                        splinesToConvert.Add(objId);
-                        continue;
-                    }
-
-                    // 类别 B: 可分解的对象 (块、多段线等)
-                    if (entity is BlockReference || entity is Polyline || entity is MInsertBlock || entity is Polyline2d)
-                    {
-                        // 安全检查：跳过外部参照块，以避免 eNotApplicable 异常
                         if (entity is BlockReference blockRef)
                         {
                             var blockDef = trans.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
                             if (blockDef != null && (blockDef.IsFromExternalReference || blockDef.IsFromOverlayReference))
                             {
-                                continue; // 是外部参照，跳过
+                                continue;
                             }
                         }
-                        entitiesToExplode.Add(objId);
+                        objectsToProcess.Add(objId);
                     }
                 }
 
-                // 步骤 2.2: 如果找到样条曲线，则将其转换为多段线
-                if (splinesToConvert.Count > 0)
+                if (objectsToProcess.Count > 0)
                 {
                     changedInLoop = true;
                     modelSpace.UpgradeOpen();
-                    foreach (var splineId in splinesToConvert)
-                    {
-                        var spline = trans.GetObject(splineId, OpenMode.ForWrite) as Spline;
-                        if (spline == null || spline.IsErased) continue;
-
-                        var polyline = ConvertSplineToPolyline(spline); // 调用转换辅助函数
-                        if (polyline != null)
-                        {
-                            polyline.Layer = spline.Layer;
-                            modelSpace.AppendEntity(polyline);
-                            trans.AddNewlyCreatedDBObject(polyline, true);
-                        }
-                        spline.Erase();
-                    }
-                    modelSpace.DowngradeOpen();
-                }
-
-                // 步骤 2.3: 如果找到可分解对象，则分解它们
-                if (entitiesToExplode.Count > 0)
-                {
-                    changedInLoop = true;
-                    modelSpace.UpgradeOpen();
-                    foreach (var entityId in entitiesToExplode)
+                    foreach (var entityId in objectsToProcess)
                     {
                         var entity = trans.GetObject(entityId, OpenMode.ForWrite) as Entity;
                         if (entity == null || entity.IsErased) continue;
 
-                        var explodedEntities = new DBObjectCollection();
-                        entity.Explode(explodedEntities);
-
-                        foreach (Entity explodedEntity in explodedEntities)
+                        if (entity is Spline spline)
                         {
-                            explodedEntity.Layer = entity.Layer;
-                            modelSpace.AppendEntity(explodedEntity);
-                            trans.AddNewlyCreatedDBObject(explodedEntity, true);
+                            var polyline = ConvertSplineToPolyline(spline);
+                            if (polyline != null)
+                            {
+                                polyline.Layer = spline.Layer;
+                                modelSpace.AppendEntity(polyline);
+                                trans.AddNewlyCreatedDBObject(polyline, true);
+                            }
+                        }
+                        else
+                        {
+                            var explodedEntities = new DBObjectCollection();
+                            entity.Explode(explodedEntities);
+
+                            foreach (Entity explodedEntity in explodedEntities)
+                            {
+                                explodedEntity.Layer = entity.Layer;
+                                modelSpace.AppendEntity(explodedEntity);
+                                trans.AddNewlyCreatedDBObject(explodedEntity, true);
+                            }
                         }
                         entity.Erase();
                     }
                     modelSpace.DowngradeOpen();
                 }
-
-            } while (changedInLoop); // 只要本轮有修改，就再循环一次，确保全部分解
+            } while (changedInLoop);
         }
 
-        /// <summary>
-        /// 将样条曲线转换为多段线 (保留您原始代码中的逻辑)
-        /// </summary>
         private Polyline ConvertSplineToPolyline(Spline spline, int precision = 20)
         {
-            // 对于一个给定的样条曲线，20-100的精度通常足够
             var polyline = new Polyline();
             double startParam = spline.StartParam;
             double endParam = spline.EndParam;
@@ -277,9 +240,6 @@ namespace CadDataExtractor
             return polyline;
         }
 
-        /// <summary>
-        /// 实体信息结构
-        /// </summary>
         private class EntityInfo
         {
             public Entity Entity { get; set; }
@@ -290,21 +250,37 @@ namespace CadDataExtractor
         {
             var result = new List<EntityInfo>();
             var modelSpace = (BlockTableRecord)trans.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+
             foreach (ObjectId objId in modelSpace)
             {
                 var entity = trans.GetObject(objId, OpenMode.ForRead) as Entity;
                 if (entity == null || entity.IsErased || !targetLayers.Contains(entity.Layer)) continue;
+
                 if (entity is Line || entity is Arc || entity is Circle)
                 {
                     result.Add(new EntityInfo { Entity = entity, LayerName = entity.Layer });
                 }
+                else if (entity is Curve curve && (curve is Polyline || curve is Polyline2d))
+                {
+                    var explodedObjects = new DBObjectCollection();
+                    curve.Explode(explodedObjects);
+
+                    foreach (Entity explodedEntity in explodedObjects)
+                    {
+                        if (explodedEntity is Line || explodedEntity is Arc)
+                        {
+                            explodedEntity.Layer = entity.Layer;
+                            result.Add(new EntityInfo { Entity = explodedEntity, LayerName = entity.Layer });
+                        }
+                        else
+                        {
+                            explodedEntity.Dispose();
+                        }
+                    }
+                }
             }
             return result;
         }
-
-        /// <summary>
-        /// 处理单个实体并转换为数据记录 (最终修正版: 处理反转法线导致的镜像问题)
-        /// </summary>
 
         private CADDataRecord ProcessEntity(Entity entity, string layerName, Point3d origin, double totalScale, Vector3d offset)
         {
@@ -312,11 +288,8 @@ namespace CadDataExtractor
 
             Point3d TransformPoint(Point3d point)
             {
-                // 1. 平移到(0,0)
                 var translatedPoint = point - origin.GetAsVector();
-                // 2. 缩放
                 var scaledPoint = translatedPoint * totalScale;
-                // 3. 居中平移
                 return scaledPoint + offset;
             }
 
@@ -335,30 +308,34 @@ namespace CadDataExtractor
                     record.圆心X = Math.Round(arcCenter.X, 6); record.圆心Y = Math.Round(arcCenter.Y, 6);
                     record.半径 = Math.Round(arc.Radius * totalScale, 6);
 
-                    // --- 【最终修正】: 彻底放弃API角度，完全基于几何反算 ---
                     Vector3d startVec = arc.StartPoint - arc.Center;
                     Vector3d endVec = arc.EndPoint - arc.Center;
-
                     double startAngleRad = Math.Atan2(startVec.Y, startVec.X);
                     double endAngleRad = Math.Atan2(endVec.Y, endVec.X);
 
                     double startAngleDeg = startAngleRad * 180.0 / Math.PI;
                     double endAngleDeg = endAngleRad * 180.0 / Math.PI;
-
                     while (startAngleDeg < 0) startAngleDeg += 360.0;
                     while (endAngleDeg < 0) endAngleDeg += 360.0;
+                    startAngleDeg %= 360.0;
+                    endAngleDeg %= 360.0;
 
                     double totalAngleDeg = endAngleDeg - startAngleDeg;
-                    if (totalAngleDeg <= 0) totalAngleDeg += 360.0;
-
-                    // 如果是镜像的，说明应该取长弧
-                    if (arc.Normal.Z < 0)
+                    if (totalAngleDeg <= 1e-9)
                     {
-                        totalAngleDeg = 360.0 - totalAngleDeg;
+                        totalAngleDeg += 360.0;
                     }
 
-                    record.起始角度 = Math.Round(startAngleDeg, 6);
-                    record.总角度 = Math.Round(totalAngleDeg, 6);
+                    if (arc.Normal.Z < 0)
+                    {
+                        record.起始角度 = Math.Round(endAngleDeg, 6);
+                        record.总角度 = Math.Round(360.0 - totalAngleDeg, 6);
+                    }
+                    else
+                    {
+                        record.起始角度 = Math.Round(startAngleDeg, 6);
+                        record.总角度 = Math.Round(totalAngleDeg, 6);
+                    }
                     break;
 
                 case Circle circle:
@@ -373,32 +350,39 @@ namespace CadDataExtractor
             }
             return record;
         }
-        /// 将数据写入CSV文件
-        /// </summary>
+
         private bool WriteToCSV(List<CADDataRecord> data, string outputPath)
         {
             using (var writer = new StreamWriter(outputPath, false, Encoding.UTF8))
             {
                 writer.WriteLine("部件ID,对象类型,对象句柄,起点X,起点Y,终点X,终点Y,圆心X,圆心Y,半径,起始角度(°),总角度(°)");
-                foreach (var line in data.Select(record => $"{record.部件ID},{record.对象类型},'{record.对象句柄}'," +
-                                                           $"{FormatDouble(record.起点X)},{FormatDouble(record.起点Y)}," +
-                                                           $"{FormatDouble(record.终点X)},{FormatDouble(record.终点Y)}," +
-                                                           $"{FormatDouble(record.圆心X)},{FormatDouble(record.圆心Y)}," +
-                                                           $"{FormatDouble(record.半径)}," +
-                                                           $"{FormatDouble(record.起始角度)},{FormatDouble(record.总角度)}"))
+                foreach (var record in data)
                 {
+                    // 对坐标和半径使用FormatDouble，但对角度使用新的FormatAngle
+                    var line = $"{record.部件ID},{record.对象类型},'{record.对象句柄}'," +
+                               $"{FormatDouble(record.起点X)},{FormatDouble(record.起点Y)}," +
+                               $"{FormatDouble(record.终点X)},{FormatDouble(record.终点Y)}," +
+                               $"{FormatDouble(record.圆心X)},{FormatDouble(record.圆心Y)}," +
+                               $"{FormatDouble(record.半径)}," +
+                               $"{FormatAngle(record.起始角度)},{FormatAngle(record.总角度)}"; // <-- 使用新方法
                     writer.WriteLine(line);
                 }
             }
             return true;
         }
 
-        /// <summary>
-        /// 格式化双精度数值
-        /// </summary>
         private string FormatDouble(double value)
         {
-            return Math.Abs(value) < 1e-10 ? "" : value.ToString("F6");
+            return value.ToString("F6");
+        }
+
+
+        /// <summary>
+        /// 新增：专门用于格式化角度的方法，确保0度不会变为空白
+        /// </summary>
+        private string FormatAngle(double value)
+        {
+            return value.ToString("F6");
         }
     }
 }

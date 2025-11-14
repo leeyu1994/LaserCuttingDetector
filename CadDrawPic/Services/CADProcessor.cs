@@ -1,5 +1,8 @@
-﻿using CadDrawPic.Config;
+﻿// Services/CADProcessor.cs
+
+using CadDrawPic.Config;
 using CadDrawPic.Utils;
+using System.Drawing; // 【新增】引用Drawing命名空间
 
 namespace CadDrawPic.Services
 {
@@ -11,7 +14,6 @@ namespace CadDrawPic.Services
         public void ProcessCADData()
         {
             Console.WriteLine("开始处理CAD数据...");
-            Console.WriteLine($"固定绘图区域: X({CADConfig.PLOT_X_MIN}-{CADConfig.PLOT_X_MAX}mm), Y({CADConfig.PLOT_Y_MIN}-{CADConfig.PLOT_Y_MAX}mm)");
 
             // 确保目录存在
             Directory.CreateDirectory(CADConfig.DataDir);
@@ -23,12 +25,6 @@ namespace CadDrawPic.Services
             var records = dataLoader.LoadCADData();
             Console.WriteLine($"成功加载数据，共 {records.Count} 行");
 
-            // 打印列名用于调试
-            if (records.Count > 0)
-            {
-                Console.WriteLine($"CSV文件列名: {string.Join(", ", records[0].Keys)}");
-            }
-
             // 检查空数据
             if (records.Count == 0)
             {
@@ -37,7 +33,7 @@ namespace CadDrawPic.Services
             }
 
             // 提取基本元素
-            var (elements, allX, allY) = dataLoader.ExtractBasicElements(records);
+            var (elements, _, _) = dataLoader.ExtractBasicElements(records);
             Console.WriteLine($"提取到 {elements.Count} 个基本元素 (直线/圆弧/圆)");
 
             // 检查是否有可绘制元素
@@ -47,25 +43,24 @@ namespace CadDrawPic.Services
                 return;
             }
 
-            // 检查元素是否在固定区域内
-            var outOfBounds = CADUtils.CheckElementsInBounds(elements);
-            if (outOfBounds.Count > 0)
+            // 【新增】动态计算所有元素的总边界
+            RectangleF totalBounds = CADUtils.GetTotalBounds(elements);
+            if (totalBounds.IsEmpty)
             {
-                Console.WriteLine($"警告: {outOfBounds.Count}个点超出固定绘图区域");
-                for (int i = 0; i < Math.Min(3, outOfBounds.Count); i++) // 只显示前3个
-                {
-                    var item = outOfBounds[i];
-                    Console.WriteLine($"元素 {item.Index} ({item.Type}) 点({item.Point.X:F2}, {item.Point.Y:F2}) " +
-                        $"超出区域({item.Bounds.Left}-{item.Bounds.Right}, {item.Bounds.Top}-{item.Bounds.Bottom})");
-                }
+                Console.WriteLine("错误：无法计算元素的有效边界");
+                return;
             }
+            Console.WriteLine($"计算出的总边界: X({totalBounds.Left:F2} - {totalBounds.Right:F2}), Y({totalBounds.Top:F2} - {totalBounds.Bottom:F2})");
 
-            // 创建无边距绘图器并绘制
-            var noMarginPlotter = new CADPlotter(marginMm: 0f);
+
+            // 【已移除】不再需要检查元素是否在固定区域内，因为区域是根据元素动态生成的
+            // var outOfBounds = CADUtils.CheckElementsInBounds(elements);
+
+            // 【修改】创建绘图器时传入动态计算的边界
+            var noMarginPlotter = new CADPlotter(totalBounds, marginMm: 0f);
             noMarginPlotter.DrawElements(elements);
 
-            // 创建带边距绘图器并绘制
-            var marginPlotter = new CADPlotter(marginMm: CADConfig.MARGIN_MM);
+            var marginPlotter = new CADPlotter(totalBounds, marginMm: CADConfig.MARGIN_MM);
             marginPlotter.DrawElements(elements);
 
             // 验证还原度（只需验证一次）
@@ -88,8 +83,8 @@ namespace CadDrawPic.Services
             marginPlotter.SavePlot(outputWithMargin);
             Console.WriteLine($"带边距CAD图纸已保存至: {outputWithMargin}");
 
-            // 验证实际图像尺寸（只验证无边距图像）
-            ValidateImageSize(outputNoMargin);
+            // 【修改】验证图像尺寸时需要使用动态边界
+            ValidateImageSize(outputNoMargin, totalBounds);
 
             // 显示最终结果
             Console.WriteLine("\n处理完成! 运行结果:");
@@ -102,7 +97,7 @@ namespace CadDrawPic.Services
         /// <summary>
         /// 验证图像尺寸
         /// </summary>
-        private void ValidateImageSize(string imagePath)
+        private void ValidateImageSize(string imagePath, RectangleF bounds)
         {
             if (!File.Exists(imagePath))
             {
@@ -119,8 +114,9 @@ namespace CadDrawPic.Services
 
             int actualWidth = codec.Info.Width;
             int actualHeight = codec.Info.Height;
-            int expectedWidthPx = (int)Math.Round(CADConfig.PLOT_WIDTH / CADConfig.PIXEL_SIZE);
-            int expectedHeightPx = (int)Math.Round(CADConfig.PLOT_HEIGHT / CADConfig.PIXEL_SIZE);
+            // 【修改】根据动态边界计算预期尺寸
+            int expectedWidthPx = (int)Math.Round(bounds.Width / CADConfig.PIXEL_SIZE);
+            int expectedHeightPx = (int)Math.Round(bounds.Height / CADConfig.PIXEL_SIZE);
 
             Console.WriteLine($"预期图像尺寸: {expectedWidthPx}x{expectedHeightPx}像素");
             Console.WriteLine($"实际图像尺寸: {actualWidth}x{actualHeight}像素");
@@ -131,8 +127,6 @@ namespace CadDrawPic.Services
             if (widthDiff > 1 || heightDiff > 1)
             {
                 Console.WriteLine($"尺寸不匹配! 差异: 宽度差={widthDiff}px, 高度差={heightDiff}px");
-                Console.WriteLine($"精度损失: {widthDiff / (float)expectedWidthPx * 100:F2}%宽度, " +
-                    $"{heightDiff / (float)expectedHeightPx * 100:F2}%高度");
             }
             else
             {
@@ -141,3 +135,4 @@ namespace CadDrawPic.Services
         }
     }
 }
+

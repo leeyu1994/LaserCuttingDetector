@@ -1,6 +1,4 @@
-﻿<!-- 文件: LaserCuttingDetector/Dialogs/ParamSetDialog.xaml -->
-
-<dx:ThemedWindow xmlns:dxe="http://schemas.devexpress.com/winfx/2008/xaml/editors"  
+﻿<dx:ThemedWindow xmlns:dxe="http://schemas.devexpress.com/winfx/2008/xaml/editors"  
                  xmlns:dxlc="http://schemas.devexpress.com/winfx/2008/xaml/layoutcontrol"  
                  x:Class="LaserCuttingDetector.Dialogs.ParamsSetDialog"
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -10,11 +8,22 @@
                  xmlns:dxmvvm="http://schemas.devexpress.com/winfx/2008/xaml/mvvm" 
                  xmlns:dx="http://schemas.devexpress.com/winfx/2008/xaml/core"
                  xmlns:sys="clr-namespace:System;assembly=mscorlib"
+                 xmlns:converters="clr-namespace:LaserCuttingDetector.Converters"
                  mc:Ignorable="d"
-                 Width="600" Height="840"
+                 Width="434" Height="876"
+                 Title="参数设置"
                  WindowStartupLocation="CenterOwner">
 
-    <!-- 注入ICurrentWindowService，以便ViewModel可以关闭窗口 -->
+    <!-- 
+    使用说明:
+    1. 请确保此窗口的DataContext设置为你的ViewModel。
+    2. ViewModel中需要有一个名为 "Config" 的公共属性，其类型为 "ImageInspectionConfig"。
+       例如: public ImageInspectionConfig Config { get; set; }
+    3. `父部件ID列表` 的绑定需要一个IValueConverter，用于在List<string>和逗号分隔的字符串之间转换。
+    -->
+    <dx:ThemedWindow.Resources>
+        <converters:StringListToStringConverter x:Key="StringListToStringConverter" />
+    </dx:ThemedWindow.Resources>
 
     <DockPanel>
         <dx:SimpleButton Content="保存并关闭" 
@@ -22,93 +31,182 @@
                          Margin="10" 
                          Command="{Binding SaveAndCloseCommand}"/>
 
-            <dxlc:LayoutControl Orientation="Vertical">
-                <dxlc:LayoutGroup Orientation="Vertical" Header="通用配置" View="GroupBox" >
-                    <dxlc:LayoutItem Label="像素尺寸 (mm/pixel)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.001" EditValue="{Binding Config.PixelSize}" Mask="f4" />
-                    </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="目标板宽度 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardWidthMm}" Mask="f2" />
-                    </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="目标板高度 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardHeightMm}" Mask="f2" />
-                    </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="剪裁图边框(mm)">
-                        <dxe:SpinEdit EditValue="{Binding Config.CuttingFrame}" 
-                                      MinValue="0" 
-                                      MaxValue="50" 
-                                      Increment="0.1"
-                                      IsFloatValue="True"
-                                      ToolTip="用于修正图像裁切后导致的定位坐标偏差"/>
-                    </dxlc:LayoutItem>
-            </dxlc:LayoutGroup>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <dxlc:LayoutControl Orientation="Vertical" Padding="5">
 
-                <dxlc:LayoutGroup Orientation="Vertical" Header="部件检测" View="GroupBox" >
-                    <dxlc:LayoutItem Label="最大位置偏移 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.ComponentOffset}" Mask="f2" />
+                <!-- ===================== 1. 全局与图像设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="一、 全局与图像设置" View="GroupBox" IsCollapsible="True">
+                    <dxlc:LayoutItem Label="像素尺寸 (mm/px)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.001" EditValue="{Binding Config.PixelSize}" Mask="f4" 
+                                      ToolTip="核心参数。表示1个像素代表的实际物理长度。校准相机后获得。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="搜索半径 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.5" EditValue="{Binding Config.ComponentSearchRadius}" Mask="f2" />
+                    <dxlc:LayoutItem Label="电路板宽度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardWidthMm}" Mask="f2"
+                                      ToolTip="电路板设计图纸上的标准宽度。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="高斯模糊核大小">
-                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="2" EditValue="{Binding Config.BlurKernelSize}"/>
+                    <dxlc:LayoutItem Label="电路板高度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.TargetBoardHeightMm}" Mask="f2"
+                                      ToolTip="电路板设计图纸上的标准高度。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="主部件最小面积 (pixel²)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinMainComponentArea}"/>
+                    <dxlc:LayoutItem Label="CAD模板边框 (mm)">
+                        <dxe:SpinEdit EditValue="{Binding Config.CuttingFrame}" MinValue="0" Increment="0.1" IsFloatValue="True" Mask="f2"
+                                      ToolTip="CAD模板图相比实际电路板，在单边多出的留白或切割框的宽度。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="子部件最小面积 (pixel²)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinChildComponentArea}"/>
+                    <dxlc:LayoutItem Label="图像二值化阈值">
+                        <dxe:SpinEdit EditValue="{Binding Config.GlobalBinaryThreshold}" MinValue="0" MaxValue="255" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="用于区分目标和背景的灰度门槛。值越小，越多暗部区域会被识别为目标。范围 0-255"/>
                     </dxlc:LayoutItem>
                 </dxlc:LayoutGroup>
 
-                <dxlc:LayoutGroup Orientation="Vertical" Header="桥位检测" View="GroupBox">
-                    <dxlc:LayoutItem Label="对齐偏移阈值 (pixel)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.BridgePlumbOffset}" Mask="f2" />
+                <!-- ===================== 2. 部件检测设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="二、 部件检测设置" View="GroupBox" IsCollapsible="True">
+                    <dxlc:LayoutItem Label="部件偏移公差 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.ComponentOffset}" Mask="f2"
+                                      ToolTip="实际检测到的部件中心与理论中心的最大允许距离。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="长度标准值 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.BridgeLocationSize}" Mask="f3" />
+                    <dxlc:LayoutItem Label="部件搜索半径 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.5" EditValue="{Binding Config.ComponentSearchRadius}" Mask="f2"
+                                      ToolTip="以理论中心为圆心，向外搜索实际部件的最大范围。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="长度偏差 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.BridgeLengthDeviation}" Mask="f3" />
+                    <dxlc:LayoutItem Label="主部件最小面积 (px²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinMainComponentArea}"
+                                      ToolTip="只有面积大于此值的轮廓才会被视为主部件。用于过滤小的噪点。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="搜索半径 (pixel)">
-                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.BridgeSearchRadius}"/>
+                    <dxlc:LayoutItem Label="子部件最小面积 (px²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="100" EditValue="{Binding Config.MinChildComponentArea}"
+                                      ToolTip="在父部件内检测时，子部件需要满足的最小面积。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="路径最小面积 (pixel²)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.MinBridgePathArea}"/>
+                    <dxlc:LayoutItem Label="开运算核尺寸 (px)">
+                        <dxe:SpinEdit EditValue="{Binding Config.ComponentMorphOpenKernelSize}" MinValue="1" Increment="2" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="用于去除图像中的小噪点。值越大，去除的噪点越大，但可能腐蚀部件边缘。建议为奇数。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="形态学核大小">
-                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="2" EditValue="{Binding Config.BridgeMorphKernelSize}"/>
+                    <dxlc:LayoutItem Label="闭运算核尺寸 (px)">
+                        <dxe:SpinEdit EditValue="{Binding Config.ComponentMorphCloseKernelSize}" MinValue="1" Increment="2" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="用于连接部件内部的断裂或孔洞。值越大，连接能力越强，但可能使粘连部件合并。建议为奇数。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="最小距离 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinBridgeDistance}" Mask="f3" />
+                    <dxlc:LayoutItem Label="子部件开运算核 (px)">
+                        <dxe:SpinEdit EditValue="{Binding Config.ChildComponentMorphOpenKernelSize}" MinValue="1" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="专门用于子部件检测的去噪核尺寸，通常比主部件的小。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="最大距离 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxBridgeDistance}" Mask="f3" />
+                    <dxlc:LayoutItem Label="父部件ID列表">
+                        <dxe:TextEdit EditValue="{Binding Config.ParentComponentIds, Converter={StaticResource StringListToStringConverter}}"
+                                      ToolTip="需要搜索子部件的父部件ID，用英文逗号分隔。例如: A1,B2"/>
                     </dxlc:LayoutItem>
                 </dxlc:LayoutGroup>
 
-                <dxlc:LayoutGroup Orientation="Vertical" Header="宽度检测" View="GroupBox" >
-                    <dxlc:LayoutItem Label="采样步长 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthSampleStep}" Mask="f3" />
+                <!-- ===================== 3. 线宽与偏移检测设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="三、 线宽与偏移检测设置" View="GroupBox" IsCollapsible="True" >
+                    <dxlc:LayoutItem Label="宽度采样步长 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthSampleStep}" Mask="f3"
+                                      ToolTip="沿着线路每隔多远测量一次宽度。值越小，测量点越密集，结果越精确但越慢。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="合格宽度下限 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinQualifiedWidth}" Mask="f3" />
+                    <dxlc:LayoutItem Label="临近点搜索半径 (px)">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.NearbySearchRadius}"
+                                      ToolTip="如果理论采样点不在电路上，程序会在此半径内寻找最近的电路像素点。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="合格宽度上限 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxQualifiedWidth}" Mask="f3" />
+                    <dxlc:LayoutItem Label="边界搜索步数 (px)">
+                        <dxe:SpinEdit  IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.MaxSearchSteps}"
+                                       ToolTip="测量宽度时，从中心向两侧寻找边界的最大距离。防止在没有边界时无限搜索。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="偏移合格阈值 (mm)">
-                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthOffsetThreshold}" Mask="f3" />
+                    <dxlc:LayoutItem Label="最小合格线宽 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinQualifiedWidth}" Mask="f3"
+                                      ToolTip="线路宽度的下限。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="最大搜索步数">
-                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.MaxSearchSteps}"/>
+                    <dxlc:LayoutItem Label="最大合格线宽 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxQualifiedWidth}" Mask="f3"
+                                      ToolTip="线路宽度的上限。"/>
                     </dxlc:LayoutItem>
-                    <dxlc:LayoutItem Label="邻近搜索半径 (pixel)">
-                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.NearbySearchRadius}"/>
+                    <dxlc:LayoutItem Label="线路偏移公差 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.WidthOffsetThreshold}" Mask="f3"
+                                      ToolTip="线路实际中心与理论中心的最大允许偏差。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最小缺陷长度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.MinDefectLengthMm}" Mask="f3"
+                                      ToolTip="连续的宽度缺陷，如果其总长度小于此值，则不计为缺陷。"/>
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+                <!-- ===================== 4. 桥位检测设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="四、 桥位检测设置" View="GroupBox" IsCollapsible="True">
+                    <dxlc:LayoutItem Label="CAD桥位最小间距 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinBridgeDistance}" Mask="f3"
+                                      ToolTip="(CAD解析用) 程序自动识别桥位时，两端点间的最小距离。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="CAD桥位最大间距 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxBridgeDistance}" Mask="f3"
+                                      ToolTip="(CAD解析用) 程序自动识别桥位时，两端点间的最大距离。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位搜索半径 (px)">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="1" EditValue="{Binding Config.BridgeSearchRadius}"
+                                      ToolTip="(图像检测用) 以理论桥位中心为圆心，搜索桥位图像特征的范围。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位去噪核尺寸 (px)">
+                        <dxe:SpinEdit IsFloatValue="False" EditValueType="{x:Type sys:Int32}" MinValue="1" Increment="2" EditValue="{Binding Config.BridgeMorphKernelSize}"
+                                      ToolTip="在桥位搜索区域内，用于去除噪点的形态学核大小。建议为奇数。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位路径最小面积 (px²)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="1" EditValue="{Binding Config.MinBridgePathArea}"
+                                      ToolTip="构成桥位的单侧线路必须达到的最小面积，用于过滤干扰。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位对称性公差 (px)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.1" EditValue="{Binding Config.BridgePlumbOffset}" Mask="f2"
+                                      ToolTip="检查桥位是否垂直于两侧线路。值越小，要求越垂直。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最小桥位长度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinBridgeLengthMm}" Mask="f3"
+                                      ToolTip="桥位长度的下限。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最大桥位长度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxBridgeLengthMm}" Mask="f3"
+                                      ToolTip="桥位长度的上限。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位路径最小宽度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MinBridgePathWidthMm}" Mask="f3"
+                                      ToolTip="桥位两侧线路宽度的下限。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="桥位路径最大宽度 (mm)">
+                        <dxe:SpinEdit IsFloatValue="True" EditValueType="{x:Type sys:Double}" MinValue="0" Increment="0.01" EditValue="{Binding Config.MaxBridgePathWidthMm}" Mask="f3"
+                                      ToolTip="桥位两侧线路宽度的上限。"/>
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+                <!-- ===================== 5. 压痕检测设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="五、 压痕检测设置" View="GroupBox" IsCollapsible="True">
+                    <dxlc:LayoutItem Label="CAD图层名称">
+                        <dxe:TextEdit EditValue="{Binding Config.IndentationLayerName}"
+                                      ToolTip="包含压痕线路的CAD图元所在的图层名称。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="压痕采样线宽 (px)">
+                        <dxe:SpinEdit EditValue="{Binding Config.IndentationSampleLineWidth}" MinValue="1" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="在检测压痕时，用于提取平均灰度值的虚拟“画笔”的粗细。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最小合格灰度">
+                        <dxe:SpinEdit EditValue="{Binding Config.MinIndentationGrayValue}" MinValue="0" MaxValue="255" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="压痕区域平均灰度值的下限。范围 0-255"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="最大合格灰度">
+                        <dxe:SpinEdit EditValue="{Binding Config.MaxIndentationGrayValue}" MinValue="0" MaxValue="255" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="压痕区域平均灰度值的上限。范围 0-255"/>
+                    </dxlc:LayoutItem>
+                </dxlc:LayoutGroup>
+
+                <!-- ===================== 6. 不透光检测设置 ===================== -->
+                <dxlc:LayoutGroup Orientation="Vertical" Header="六、 不透光检测设置" View="GroupBox" IsCollapsible="True">
+                    <dxlc:LayoutItem Label="不透光采样步长 (mm)">
+                        <dxe:SpinEdit EditValue="{Binding Config.TransmissionSampleStep}" MinValue="0" Increment="0.01" IsFloatValue="True" EditValueType="{x:Type sys:Double}" Mask="f3"
+                                      ToolTip="沿线路每隔多远检查一次透光性。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="不透光检查宽度 (px)">
+                        <dxe:SpinEdit EditValue="{Binding Config.TransmissionCheckWidthPixels}" MinValue="1" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="在每个采样点，垂直于线路方向检查像素的扫描条宽度。"/>
+                    </dxlc:LayoutItem>
+                    <dxlc:LayoutItem Label="透光灰度阈值">
+                        <dxe:SpinEdit EditValue="{Binding Config.MinTransmissionGrayValue}" MinValue="0" MaxValue="255" Increment="1" IsFloatValue="False" EditValueType="{x:Type sys:Int32}"
+                                      ToolTip="核心参数。如果扫描条内所有像素的灰度值都高于此值，则认为该点“透光”。范围 0-255"/>
                     </dxlc:LayoutItem>
                 </dxlc:LayoutGroup>
 
             </dxlc:LayoutControl>
+        </ScrollViewer>
     </DockPanel>
 </dx:ThemedWindow>

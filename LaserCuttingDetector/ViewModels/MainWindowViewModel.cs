@@ -2,7 +2,6 @@
 using CommunityToolkit.Mvvm.Input;
 using DevExpress.Mvvm;
 using LaserCuttingDetector.Commons;
-using LaserCuttingDetector.Commons.LaserCuttingDetector.Commons;
 using LaserCuttingDetector.Dialogs;
 using LaserCuttingDetector.Models;
 using LaserCuttingDetector.UserControls;
@@ -21,12 +20,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Threading;
 using VisionLibrary;
 using VisionLibrary.Models;
-// 使用别名解决命名冲突
+using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using LogManager = LaserCuttingDetector.Models.LogManager;
-using Point = System.Windows.Point; // 明确使用 WPF 的 Point 类
+using Point = System.Windows.Point;
 
 namespace LaserCuttingDetector.ViewModels
 {
@@ -62,6 +60,12 @@ namespace LaserCuttingDetector.ViewModels
         [ObservableProperty]
         private ObservableCollection<AggregatedWidthDefect> _widthDefects;
 
+        // 【新增】本地相机控制器实例
+        private CameraController _cameraController;
+        // 【新增】用于在停止时能正确取消订阅的事件处理器委托实例
+        private Action<Bitmap> _imageReceivedHandler;
+
+
         private ImageInspectionLibrary _imageInspector;
         private double _pixelSize;
         private Image _diffImage;
@@ -81,11 +85,9 @@ namespace LaserCuttingDetector.ViewModels
             BridgeDefects = new ObservableCollection<BridgeResult>();
             WidthDefects = new ObservableCollection<AggregatedWidthDefect>();
             MisalignmentDefects = new ObservableCollection<ComponentResult>();
+            IndentationDefects = new ObservableCollection<IndentationResult>(); // 【新增】初始化压痕缺陷集合
             Shapes = new ObservableCollection<DrawableShape>();
 
-            // 订阅 gRPC 服务的事件
-            GrpcClientService.Instance.CameraLogReceived += OnCameraLogReceived;
-            GrpcClientService.Instance.CameraStatusChanged += OnCameraStatusChanged;
         }
         #endregion
 
@@ -112,7 +114,6 @@ namespace LaserCuttingDetector.ViewModels
 
         #region 核心数据绑定属性 (使用 CommunityToolkit.Mvvm 重构)
 
-        // 使用 [ObservableProperty] 特性，会自动生成 public Image MainImage { get; set; } 等属性
         [ObservableProperty]
         private Image _mainImage;
 
@@ -131,6 +132,10 @@ namespace LaserCuttingDetector.ViewModels
 
         [ObservableProperty]
         private ObservableCollection<ComponentResult> _misalignmentDefects;
+
+        // 【新增】压痕缺陷的数据集合，用于绑定UI
+        [ObservableProperty]
+        private ObservableCollection<IndentationResult> _indentationDefects;
 
         #endregion
 
@@ -159,6 +164,11 @@ namespace LaserCuttingDetector.ViewModels
         // 当在UI上选中的错位缺陷行改变时，将触发 OnSelectedMisalignmentDefectChanged 方法
         [ObservableProperty]
         private ComponentResult _selectedMisalignmentDefect;
+
+        // 【新增】当在UI上选中的压痕缺陷行改变时，将触发 OnSelectedIndentationDefectChanged 方法
+        [ObservableProperty]
+        private IndentationResult _selectedIndentationDefect;
+
 
         /// <summary>
         /// 当选中的桥位缺陷变化时执行的逻辑
@@ -238,6 +248,39 @@ namespace LaserCuttingDetector.ViewModels
             });
         }
 
+        // 【新增】当选中的压痕缺陷变化时执行的逻辑
+        partial void OnSelectedIndentationDefectChanged(IndentationResult value)
+        {
+            Shapes.Clear(); // 清除旧的形状
+
+            if (value != null && value.CenterX_Result.HasValue && value.CenterY_Result.HasValue)
+            {
+                // 压痕缺陷没有轮廓，我们像桥位一样，在它的中心点绘制一个定位框
+                var center = new Point(value.CenterX_Result.Value, value.CenterY_Result.Value);
+                double halfSize = LocatorBoxSize / 2.0;
+
+                var points = new PointCollection
+                {
+                    new Point(center.X - halfSize, center.Y - halfSize),
+                    new Point(center.X + halfSize, center.Y - halfSize),
+                    new Point(center.X + halfSize, center.Y + halfSize),
+                    new Point(center.X - halfSize, center.Y + halfSize)
+                };
+
+                var shape = new DrawableShape
+                {
+                    Points = points,
+                    IsSelected = true
+                };
+                Shapes.Add(shape);
+
+                // 更新UI视图，使其居中放大
+                CenterPoint = center;
+                ZoomFactor = DefaultZoomFactor;
+            }
+        }
+
+
         // 创建一个通用的 UpdateShape 方法，替换 UpdateLocator
         private void UpdateShape<T>(T defect, Func<T, (System.Windows.Point center, PointCollection points)?> getShapeFunc) where T : class
         {
@@ -274,9 +317,15 @@ namespace LaserCuttingDetector.ViewModels
         {
             StartGrpcServer();
 
-            // 初始化相机（通过 gRPC）
-            await InitializeCameraAsync();
+            // 【修改】初始化本地相机
+            _cameraController = new CameraController();
+            // 订阅日志事件，直接在UI上显示相机日志
+            _cameraController.LogMessage += (msg) =>
+            {
+                Application.Current.Dispatcher.Invoke(() => LogManager.Instance.Info($"[相机] {msg}"));
+            };
 
+            InitializeCamera(); // 调用新的本地初始化方法
             var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Solutions");
             Products = new ObservableCollection<string>(Directory.GetDirectories(path)
                 .Select(Path.GetFileName)
@@ -287,15 +336,15 @@ namespace LaserCuttingDetector.ViewModels
         [RelayCommand]
         private async Task ViewClosedAsync()
         {
-            await _grabbingCts?.CancelAsync();
-            _grabbingCts?.Dispose();
-            _grabbingCts = null;
-
-            // 释放相机资源
-            if (IsCameraInitialized)
+            // 确保停止采集
+            if (IsCameraGrabbing)
             {
-                await GrpcClientService.Instance.ReleaseCameraAsync();
+                await StopAsync();
             }
+
+            // 释放本地相机资源
+            _cameraController?.Dispose();
+            _cameraController = null;
 
             // 停止 gRPC 服务器
             StopGrpcServer();
@@ -453,67 +502,76 @@ namespace LaserCuttingDetector.ViewModels
             }
 
             // 【核心修改】
-            IsWaitIndicatorVisible = true;
-            WaitIndicatorText = "正在启动持续采集中...";
-
-            // 1. 创建 CancellationTokenSource 来控制流的生命周期
-            _grabbingCts = new CancellationTokenSource();
-
-            // 2. 更新UI状态
-            IsCameraGrabbing = true;
-            CameraStatusText = "正在采集...";
-            IsWaitIndicatorVisible = false;
-
-            // 3. 在后台任务中启动并监听流，防止UI线程阻塞
-            _ = Task.Run(async () =>
+            // 1. 定义当相机接收到图像时要执行的操作
+            _imageReceivedHandler = async (receivedBitmap) =>
             {
-                // 定义每次收到结果时要执行的操作
-                Action<ProcessStreamedResult> onResultReceived = (result) =>
-                {
-                    // 【关键】将处理逻辑调度回UI线程执行
-                    Application.Current.Dispatcher.InvokeAsync(async () =>
-                    {
-                        // 调用你现有的、功能完备的结果处理方法
-                        await ProcessVisionResultAsync(result);
-                    });
-                };
+                // 克隆图像，因为原始 bitmap 很快会被相机SDK回收
+                using var imageClone = (Bitmap)receivedBitmap.Clone();
 
-                // 调用新的流式服务，并传入回调函数和取消令牌
-                await GrpcClientService.Instance.StartGrabbingAndProcessingStreamedAsync(onResultReceived, _grabbingCts.Token);
-
-            }, _grabbingCts.Token).ContinueWith(t =>
-            {
-                // 当任务结束时（无论是正常完成还是被取消），在UI线程更新状态
-                Application.Current.Dispatcher.Invoke(() =>
+                // 将 Bitmap 转换为 byte[]
+                byte[] imageBytes;
+                using (var ms = new MemoryStream())
                 {
-                    IsCameraGrabbing = false;
-                    CameraStatusText = IsCameraInitialized ? "相机已就绪" : "相机未初始化";
-                    LogManager.Instance.Info("持续采集已停止。");
+                    // 使用 Bmp 格式，因为它无损且快速
+                    imageClone.Save(ms, ImageFormat.Bmp);
+                    imageBytes = ms.ToArray();
+                }
+
+                // 通过 gRPC 将字节数据发送到服务器进行处理
+                var result = await GrpcClientService.Instance.ProcessImageFromBytesStreamedAsync(imageBytes);
+
+                // 在UI线程上处理返回的结果
+                await Application.Current.Dispatcher.InvokeAsync(async () =>
+                {
+                    await ProcessVisionResultAsync(result);
                 });
-            });
+            };
+
+            // 2. 订阅事件
+            _cameraController.ImageReceived += _imageReceivedHandler;
+
+            // 3. 启动相机硬件采集
+            if (_cameraController.StartGrab(true))
+            {
+                IsCameraGrabbing = true;
+                CameraStatusText = "正在采集...";
+                LogManager.Instance.Info("相机已启动，等待硬件触发...");
+            }
+            else
+            {
+                // 启动失败，取消订阅
+                _cameraController.ImageReceived -= _imageReceivedHandler;
+                MessageBoxService.ShowMessage("启动相机采集失败！", "错误", MessageButton.OK, MessageIcon.Error);
+            }
         }
         [RelayCommand]
         private async Task StopAsync()
         {
+            if (!IsCameraGrabbing)
+            {
+                return;
+            }
+
             // 【核心修改】
-            // 1. 通过 CancellationTokenSource 取消正在运行的流
-            // 这会导致服务端的循环退出，并触发客户端 Task 的结束
-            if (_grabbingCts != null && !_grabbingCts.IsCancellationRequested)
+            // 1. 停止相机硬件
+            _cameraController.StopGrab();
+
+            // 2. 取消订阅事件，防止内存泄漏和意外调用
+            if (_imageReceivedHandler != null)
             {
-                _grabbingCts.Cancel();
-                _grabbingCts.Dispose();
-                _grabbingCts = null;
+                _cameraController.ImageReceived -= _imageReceivedHandler;
+                _imageReceivedHandler = null; // 清空引用
             }
 
-            // 2. （可选但推荐）额外调用一次Stop，确保服务端相机硬件明确停止
-            var response = await GrpcClientService.Instance.StopCameraGrabAsync();
-            if (response.Success)
-            {
-                LogManager.Instance.Info("已向服务器发送停止采集指令。");
-            }
+            // 3. 更新UI状态
+            IsCameraGrabbing = false;
+            CameraStatusText = IsCameraInitialized ? "相机已就绪" : "相机未初始化";
+            LogManager.Instance.Info("相机采集已停止。");
 
-            // UI状态的更新会由 StartGrabAsync 中任务的 ContinueWith 部分自动处理
+            // 这里返回一个完成的任务以匹配 async Task 签名
+            await Task.CompletedTask;
         }
+
         [RelayCommand]
         private void ShowDiff()
         {
@@ -573,8 +631,10 @@ namespace LaserCuttingDetector.ViewModels
             IsWaitIndicatorVisible = true;
             WaitIndicatorText = "处理本地图像中，请稍候...";
 
-            // 调用新的流式方法
-            var result = await GrpcClientService.Instance.ProcessImageFromPathStreamedAsync(selectedFilePath);
+            // 2. 调用新的gRPC流式方法，直接传递图像的字节数据
+            // 1. 将文件完整读取到字节数组中
+            byte[] imageBytes = await File.ReadAllBytesAsync(selectedFilePath);
+            var result = await GrpcClientService.Instance.ProcessImageFromBytesStreamedAsync(imageBytes);
 
             // 调用更新后的 ProcessVisionResultAsync
             await ProcessVisionResultAsync(result);
@@ -695,6 +755,10 @@ namespace LaserCuttingDetector.ViewModels
                         .Where(c => "F".Equals(c.Result, StringComparison.OrdinalIgnoreCase))
                         .ToList() ?? new List<ComponentResult>();
 
+                    // 【新增】筛选压痕缺陷：Result 属性为 "F"
+                    var indentationDefectsToAdd = localInspectionResult?.DetectedIndentations
+                        .Where(i => "F".Equals(i.Result, StringComparison.OrdinalIgnoreCase))
+                        .ToList() ?? new List<IndentationResult>();
 
                     // 4.2 将Bitmap转换为线程安全的Bitmap对象用于UI显示
                     var displayImage = (Bitmap)localInspectionResult.AlignedImage.ToBitmap().Clone();
@@ -720,12 +784,14 @@ namespace LaserCuttingDetector.ViewModels
                         BridgeDefects.Clear();
                         WidthDefects.Clear();
                         MisalignmentDefects.Clear();
+                        IndentationDefects.Clear(); // 【新增】清空压痕缺陷列表
                         Shapes.Clear();
 
                         // 添加筛选后的缺陷列表
                         foreach (var bridge in bridgeDefectsToAdd) BridgeDefects.Add(bridge);
                         foreach (var width in widthDefectsToAdd) WidthDefects.Add(width);
                         foreach (var component in componentDefectsToAdd) MisalignmentDefects.Add(component);
+                        foreach (var indentation in indentationDefectsToAdd) IndentationDefects.Add(indentation); // 【新增】添加压痕缺陷
 
                         // 5.4 显示报告
                         string report = $"检测完成!\n" +
@@ -734,7 +800,8 @@ namespace LaserCuttingDetector.ViewModels
                                     $"------ 客户端检测结果 ------\n" +
                                     $"桥位缺陷: {bridgeDefectsToAdd.Count} 处\n" +
                                     $"宽度缺陷: {widthDefectsToAdd.Count} 段\n" +
-                                    $"错位缺陷: {componentDefectsToAdd.Count} 处";
+                                    $"错位缺陷: {componentDefectsToAdd.Count} 处\n" + // 【修改】在末尾添加换行符
+                                    $"压痕缺陷: {indentationDefectsToAdd.Count} 处"; // 【新增】在报告中显示压痕缺陷数量
 
                         MessageBoxService.ShowMessage(report, "检测报告");
                         LogManager.Instance.Info($"视觉检测流程全部完成。服务端消息: {metadata.Message}");
@@ -866,15 +933,24 @@ namespace LaserCuttingDetector.ViewModels
         }
 
 
-        private async Task InitializeCameraAsync()
+        private void InitializeCamera()
         {
-            var response = await GrpcClientService.Instance.InitializeCameraAsync();
-            if (!response.Success)
+            if (_cameraController == null) return;
+
+            bool success = _cameraController.Initialize(); // 使用默认参数
+
+            IsCameraInitialized = success;
+            CameraStatusText = success ? "相机已就绪" : "相机初始化失败";
+
+            if (!success)
             {
-                MessageBoxService.ShowMessage($"相机初始化失败: {response.Message}", "错误", MessageButton.OK, MessageIcon.Error);
+                MessageBoxService.ShowMessage($"相机初始化失败，请检查连接和驱动。", "错误", MessageButton.OK, MessageIcon.Error);
+            }
+            else
+            {
+                LogManager.Instance.Info("本地相机初始化成功。");
             }
         }
-
         #endregion
 
         #region 辅助方法 (这部分方法与MVVM框架无关，无需改动)
@@ -923,6 +999,8 @@ namespace LaserCuttingDetector.ViewModels
         {
             StopGrpcServer(_grpcServerProcess); // 调用重载方法
         }
+
+
 
         // 新增：停止 gRPC 服务进程的重载方法
         private void StopGrpcServer(Process process)

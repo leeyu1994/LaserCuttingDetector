@@ -1,4 +1,4 @@
-﻿// VisionLibrary/Modules/ComponentDetector.cs
+﻿ // VisionLibrary/Modules/ComponentDetector.cs
 using OpenCvSharp;
 using VisionLibrary.Models;
 using System;
@@ -41,9 +41,12 @@ namespace VisionLibrary.Modules
             _searchRadiusPixels = _config.ComponentSearchRadius / _config.PixelSize;
 
             // 预创建形态学核
-            _kernelOpen = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
-            _kernelClose = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(7, 7));
-            _childKernelOpen = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(2, 2));
+            _kernelOpen = Cv2.GetStructuringElement(MorphShapes.Rect,
+                new Size(_config.ComponentMorphOpenKernelSize, _config.ComponentMorphOpenKernelSize));
+            _kernelClose = Cv2.GetStructuringElement(MorphShapes.Rect,
+                new Size(_config.ComponentMorphCloseKernelSize, _config.ComponentMorphCloseKernelSize));
+            _childKernelOpen = Cv2.GetStructuringElement(MorphShapes.Rect,
+                new Size(_config.ChildComponentMorphOpenKernelSize, _config.ChildComponentMorphOpenKernelSize));
         }
 
         /// <summary>

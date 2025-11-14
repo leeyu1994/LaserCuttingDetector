@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace VmHelper
+namespace LaserCuttingDetector.Models
 {
     // 枚举定义
     public enum CameraType

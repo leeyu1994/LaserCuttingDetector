@@ -90,7 +90,16 @@ namespace VisionLibrary.Modules
                             (mask) => Cv2.Ellipse(mask, circleCenter, axes, 0, startAngle, endAngle, Scalar.White, lineWidth));
                     }
                 }
-
+                // 根据平均灰度值和配置的阈值来判断结果
+                if (result.AverageGray >= _config.MinIndentationGrayValue &&
+                    result.AverageGray <= _config.MaxIndentationGrayValue)
+                {
+                    result.Result = "T"; // 合格
+                }
+                else
+                {
+                    result.Result = "F"; // 不合格
+                }
                 results.Add(result);
             }
 

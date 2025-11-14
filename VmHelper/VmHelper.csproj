@@ -126,13 +126,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CameraController.cs" />
     <Compile Include="Helper.cs" />
-    <Compile Include="ImageConverter.cs" />
     <Compile Include="LegacyFrameworkServiceImpl.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="ZkcpAPI.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GrpcContracts\GrpcContracts.csproj">

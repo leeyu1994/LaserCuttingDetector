@@ -1,16 +1,16 @@
 ﻿// CameraControllerServer.cs
+
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 
-namespace VmHelper
+namespace LaserCuttingDetector.Models
 {
     /// <summary>
     /// 服务端的相机控制器，移植自客户端的CameraController
     /// </summary>
-    public class CameraControllerServer : IDisposable
+    public class CameraController : IDisposable
     {
         private long _camera; // 相机句柄
         private readonly ImageDataCallback _imageCallback;
@@ -24,7 +24,7 @@ namespace VmHelper
         public event Action<Bitmap> ImageReceived;
         public event Action<string> LogMessage;
 
-        public CameraControllerServer()
+        public CameraController()
         {
             _imageCallback = OnImageDataCallback;
             _msgCallback = OnMsgCallback;

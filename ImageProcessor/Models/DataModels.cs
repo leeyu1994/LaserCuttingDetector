@@ -84,6 +84,20 @@ namespace VisionLibrary.Models
         public Rect BoundingBox { get; set; }
     }
 
+    public class LogicalComponent
+    {
+        /// <summary>逻辑组件ID，比如 "0_1", "0_2", "先切_1" 等</summary>
+        public string Id { get; set; } = string.Empty;
+
+        /// <summary>来源的大类部件ID： "0" / "先切" / "可掉落" 等</summary>
+        public string SourceComponentId { get; set; } = string.Empty;
+
+        /// <summary>这个逻辑组件包含的所有 CAD 图元</summary>
+        public List<CadRawData> Entities { get; set; } = new();
+
+        /// <summary>物理边界（mm）</summary>
+        public ComponentExtremes? Extremes { get; set; }
+    }
 
     // =================================================================
     // 结果数据模型 (Result Models)
@@ -229,6 +243,22 @@ namespace VisionLibrary.Models
         /// </summary>
         public double ProcessTimeSeconds { get; set; }
     }
+
+    public class DroppableEdgeResult
+    {
+        public int CurveId { get; set; }              // 第几个CAD图元
+        public string CurveType { get; set; } = "";   // LINE / ARC / CIRCLE
+        public double DesignX { get; set; }           // 设计点 (mm)
+        public double DesignY { get; set; }
+        public int FinalMappedX { get; set; }         // 理论映射像素点
+        public int FinalMappedY { get; set; }
+        public bool IsValid { get; set; }             // 是否找到单边边界
+        public double? EdgeX { get; set; }            // 找到的边界点像素坐标
+        public double? EdgeY { get; set; }
+        public double? OffsetDistanceMm { get; set; } // 单边偏移
+        public string OffsetQualified { get; set; } = "F";
+    }
+
 
     /// <summary>
     /// 包含单个压痕（线段或圆弧）的完整检测结果。

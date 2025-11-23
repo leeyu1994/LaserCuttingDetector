@@ -35,7 +35,6 @@ namespace VisionLibrary
                 Index = index;
             }
         }
-        // #########################################
 
         public void Init(string configPath, string cadDataPath, string cadTemplateImagePath)
         {
@@ -63,6 +62,13 @@ namespace VisionLibrary
             _isInitialized = true;
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="image"></param>
+        /// <param name="cornerPoints"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         public InspectionResult Run(Mat image, Point2f[] cornerPoints)
         {
             if (!_isInitialized || _disposed) throw new InvalidOperationException("库未初始化或已被释放。");
@@ -105,18 +111,60 @@ namespace VisionLibrary
 
             using var binaryImage = new Mat();
             Cv2.Threshold(grayImage, binaryImage, _config.GlobalBinaryThreshold, 255, ThresholdTypes.BinaryInv);
-
             var converter = new CoordinateConverter(_config);
 
             var componentExtremes = _dataParser!.GenerateComponentExtremesFromCad();
             var allComponentInfos = _dataParser.ConvertExtremesToComponentInfo(componentExtremes, converter);
             var bridgeLocations = _dataParser.GenerateBridgeCenterPoints(converter);
 
+            var allCad = _dataParser.CADDataCache;
+
+            // 1. 先取 0 + 先切 的线/圆/弧
+            var candidateForWidth = allCad
+                .Where(r =>
+                    (r.ObjectType == "LINE" || r.ObjectType == "CIRCLE" || r.ObjectType == "ARC") &&
+                    (r.ComponentId == "0" || r.ComponentId == "先切"))
+                .ToList();
+
+            // 2. 取 可掉落 的线/圆/弧
+            var droppableEntities = allCad
+                .Where(r =>
+                    (r.ObjectType == "LINE" || r.ObjectType == "CIRCLE" || r.ObjectType == "ARC") &&
+                    r.ComponentId == "可掉落")
+                .ToList();
+
+            // 3. 做一个“几何签名”，判断重合
+            string GetGeomKey(CadRawData row)
+            {
+                var type = (row.ObjectType ?? "").Trim().ToUpper();
+
+                return type switch
+                {
+                    "LINE" => $"{type}|{row.StartX:F3},{row.StartY:F3}->{row.EndX:F3},{row.EndY:F3}",
+                    "CIRCLE" => $"{type}|C=({row.CenterX:F3},{row.CenterY:F3}),R={row.Radius:F3}",
+                    "ARC" =>
+                        $"{type}|C=({row.CenterX:F3},{row.CenterY:F3}),R={row.Radius:F3},A=({row.StartAngle:F3},{row.TotalAngle:F3})",
+                    _ => type
+                };
+            }
+
+            // 4. 把可掉落几何做成一个 HashSet，方便查重
+            var droppableGeomSet = new HashSet<string>(
+                droppableEntities.Select(GetGeomKey)
+            );
+
+            // 5. 最终用于宽度检测的 CAD：
+            //    只保留 “不在可掉落几何集合中的 0/先切 图元”
+            var widthCad = candidateForWidth
+                .Where(r => !droppableGeomSet.Contains(GetGeomKey(r)))
+                .ToList();
+
+
             var componentTask = Task.Run(() => _componentDetector!.Detect(binaryImage, allComponentInfos));
             var bridgeTask = Task.Run(() => _bridgeDetector!.Detect(binaryImage, bridgeLocations));
             var widthTask = Task.Run(() => {
                 var widthDetector = new WidthDetector(_config, converter);
-                return widthDetector.Detect(binaryImage, _dataParser.CADDataCache);
+                return widthDetector.Detect(binaryImage, widthCad);
             });
 
             Task.WaitAll(componentTask, bridgeTask, widthTask);
@@ -171,7 +219,7 @@ namespace VisionLibrary
 
                 var avgWidth = segment.Where(s => s.Sample.WidthMm.HasValue).DefaultIfEmpty().Average(s => s?.Sample.WidthMm ?? 0);
                 var maxOffset = segment.Where(s => s.Sample.OffsetDistanceMm.HasValue).DefaultIfEmpty().Max(s => s?.Sample.OffsetDistanceMm ?? 0);
-                var bbox = Cv2.BoundingRect(validPoints);
+                var box = Cv2.BoundingRect(validPoints);
 
                 aggregatedDefects.Add(new AggregatedWidthDefect
                 {
@@ -183,7 +231,7 @@ namespace VisionLibrary
                     AverageWidthMm = avgWidth,
                     MaxOffsetMm = maxOffset,
                     DefectShapePoints = validPoints,
-                    CenterPoint = new Point2f(bbox.X + bbox.Width / 2f, bbox.Y + bbox.Height / 2f)
+                    CenterPoint = new Point2f(box.X + box.Width / 2f, box.Y + box.Height / 2f)
                 });
             }
 

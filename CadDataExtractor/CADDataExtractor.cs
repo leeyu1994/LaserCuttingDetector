@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -66,7 +65,7 @@ namespace CadDataExtractor
                 }
 
                 bool hasValidBounds = minX != double.MaxValue;
-                Point3d origin = userOrigin.HasValue ? userOrigin.Value : (hasValidBounds ? new Point3d(minX, minY, 0) : Point3d.Origin);
+                Point3d origin = userOrigin ?? (hasValidBounds ? new Point3d(minX, minY, 0) : Point3d.Origin);
                 double autoFitScale = 1.0;
                 Vector3d centeringOffset = Vector3d.ZAxis;
 
@@ -159,7 +158,9 @@ namespace CadDataExtractor
 
         private void ProcessComplexObjects(Database db, Transaction trans, HashSet<string> targetLayers)
         {
-            var modelSpace = (BlockTableRecord)trans.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+            var modelSpace = (BlockTableRecord)trans.GetObject(
+                SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+
             bool changedInLoop;
 
             do
@@ -167,21 +168,19 @@ namespace CadDataExtractor
                 changedInLoop = false;
                 var objectsToProcess = new List<ObjectId>();
 
+                // 1. 找出所有需要处理的复杂对象（块、插入、样条）
                 foreach (ObjectId objId in modelSpace)
                 {
                     var entity = trans.GetObject(objId, OpenMode.ForRead) as Entity;
-                    if (entity == null || entity.IsErased || !targetLayers.Contains(entity.Layer)) continue;
+                    if (entity == null || entity.IsErased) continue;
 
-                    if (entity is BlockReference || entity is MInsertBlock || entity is Spline)
+                    // 只处理目标图层
+                    if (!targetLayers.Contains(entity.Layer)) continue;
+
+                    if (entity is BlockReference || entity is Spline)
                     {
-                        if (entity is BlockReference blockRef)
-                        {
-                            var blockDef = trans.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead) as BlockTableRecord;
-                            if (blockDef != null && (blockDef.IsFromExternalReference || blockDef.IsFromOverlayReference))
-                            {
-                                continue;
-                            }
-                        }
+                        // ★ 这里不再跳过外部参照 / overlay
+                        //   让所有 BlockReference 都进入 objectsToProcess
                         objectsToProcess.Add(objId);
                     }
                 }
@@ -190,11 +189,13 @@ namespace CadDataExtractor
                 {
                     changedInLoop = true;
                     modelSpace.UpgradeOpen();
+
                     foreach (var entityId in objectsToProcess)
                     {
                         var entity = trans.GetObject(entityId, OpenMode.ForWrite) as Entity;
                         if (entity == null || entity.IsErased) continue;
 
+                        // 2. 样条曲线 → 多段线
                         if (entity is Spline spline)
                         {
                             var polyline = ConvertSplineToPolyline(spline);
@@ -204,9 +205,40 @@ namespace CadDataExtractor
                                 modelSpace.AppendEntity(polyline);
                                 trans.AddNewlyCreatedDBObject(polyline, true);
                             }
+
+                            entity.Erase(); // 删除原来的样条
+                        }
+                        else if (entity is BlockReference blockRef)
+                        {
+                            // ★ 对所有 BlockReference（包括 XREF）尝试 Explode
+                            //    如果 explode 失败，我们再考虑特殊处理
+                            var explodedEntities = new DBObjectCollection();
+                            try
+                            {
+                                blockRef.Explode(explodedEntities);
+                            }
+                            catch
+                            {
+                                // ★ 部分情况下 XREF 可能不能直接 Explode
+                                //   这里可以视情况记录日志，或者后续再加特殊逻辑
+                                explodedEntities.Clear();
+                            }
+
+                            foreach (Entity explodedEntity in explodedEntities)
+                            {
+                                // 继承块引用的图层，这样你的“部件ID=图层名”逻辑就能成立
+                                explodedEntity.Layer = blockRef.Layer;
+
+                                modelSpace.AppendEntity(explodedEntity);
+                                trans.AddNewlyCreatedDBObject(explodedEntity, true);
+                            }
+
+                            // 删除原来的块引用
+                            blockRef.Erase();
                         }
                         else
                         {
+                            // 其它复杂对象（比如 MInsertBlock）按原先逻辑 explode
                             var explodedEntities = new DBObjectCollection();
                             entity.Explode(explodedEntities);
 
@@ -216,11 +248,14 @@ namespace CadDataExtractor
                                 modelSpace.AppendEntity(explodedEntity);
                                 trans.AddNewlyCreatedDBObject(explodedEntity, true);
                             }
+
+                            entity.Erase();
                         }
-                        entity.Erase();
                     }
+
                     modelSpace.DowngradeOpen();
                 }
+
             } while (changedInLoop);
         }
 

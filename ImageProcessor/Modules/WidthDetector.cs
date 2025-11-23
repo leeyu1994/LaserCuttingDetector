@@ -12,17 +12,8 @@ namespace VisionLibrary.Modules
     /// <summary>
     /// 负责根据CAD理论路径，在图像上采样并检测线路的宽度和偏移。
     /// </summary>
-    public class WidthDetector
+    public class WidthDetector(ImageInspectionConfig config, CoordinateConverter converter)
     {
-        private readonly ImageInspectionConfig _config;
-        private readonly CoordinateConverter _converter;
-
-        public WidthDetector(ImageInspectionConfig config, CoordinateConverter converter)
-        {
-            _config = config;
-            _converter = converter;
-        }
-
         /// <summary>
         /// 执行宽度检测的核心方法。
         /// </summary>
@@ -44,7 +35,7 @@ namespace VisionLibrary.Modules
             Parallel.For(0, validEntities.Count, i =>
             {
                 var csvRow = validEntities[i];
-                var (samples, normals) = SampleEntity(csvRow, _config.WidthSampleStep);
+                var (samples, normals) = SampleEntity(csvRow, config.WidthSampleStep);
 
                 for (int j = 0; j < samples.Count; j++)
                 {
@@ -62,7 +53,7 @@ namespace VisionLibrary.Modules
         private WidthSampleResult ProcessSamplePoint(FastPixelData pixelData, Point2d designPointMm, (double nx, double ny) normal, int curveId, string curveType)
         {
             // 1. 将理论物理坐标(mm)转换为像素坐标(px)
-            Point mappedPixel = _converter.ToPixel(designPointMm);
+            Point mappedPixel = converter.ToPixel(designPointMm);
             int finalX = mappedPixel.X;
             int finalY = mappedPixel.Y;
 
@@ -70,7 +61,7 @@ namespace VisionLibrary.Modules
             bool isValid = pixelData.IsValidPixel(finalX, finalY);
             if (!isValid)
             {
-                var nearbyPoint = FindNearbyValidPoint(pixelData, finalX, finalY, _config.NearbySearchRadius);
+                var nearbyPoint = FindNearbyValidPoint(pixelData, finalX, finalY, config.NearbySearchRadius);
                 if (nearbyPoint.HasValue)
                 {
                     finalX = nearbyPoint.Value.X;
@@ -93,14 +84,14 @@ namespace VisionLibrary.Modules
             if (!isValid) return result;
 
             // 3. 从有效点出发，沿法线正反两个方向搜索线路边界
-            var posBoundary = SearchBoundary(pixelData, finalX, finalY, normal.nx, normal.ny, _config.MaxSearchSteps);
-            var negBoundary = SearchBoundary(pixelData, finalX, finalY, -normal.nx, -normal.ny, _config.MaxSearchSteps);
+            var posBoundary = SearchBoundary(pixelData, finalX, finalY, normal.nx, normal.ny, config.MaxSearchSteps);
+            var negBoundary = SearchBoundary(pixelData, finalX, finalY, -normal.nx, -normal.ny, config.MaxSearchSteps);
 
             // 4. 根据找到的边界点计算宽度和中心点
             if (posBoundary.HasValue && negBoundary.HasValue)
             {
                 double widthPixel = posBoundary.Value.DistanceTo(negBoundary.Value);
-                result.WidthMm = widthPixel * _config.PixelSize;
+                result.WidthMm = widthPixel * config.PixelSize;
                 result.MidX = (posBoundary.Value.X + negBoundary.Value.X) / 2.0;
                 result.MidY = (posBoundary.Value.Y + negBoundary.Value.Y) / 2.0;
             }
@@ -110,14 +101,14 @@ namespace VisionLibrary.Modules
             {
                 double xDev = result.MidX.Value - mappedPixel.X;
                 double yDev = result.MidY.Value - mappedPixel.Y;
-                result.OffsetDistanceMm = Math.Sqrt(xDev * xDev + yDev * yDev) * _config.PixelSize;
-                result.OffsetQualified = result.OffsetDistanceMm <= _config.WidthOffsetThreshold ? "T" : "F";
+                result.OffsetDistanceMm = Math.Sqrt(xDev * xDev + yDev * yDev) * config.PixelSize;
+                result.OffsetQualified = result.OffsetDistanceMm <= config.WidthOffsetThreshold ? "T" : "F";
             }
 
             // 6. 判断宽度是否合格
             if (result.WidthMm.HasValue)
             {
-                result.WidthQualified = (result.WidthMm >= _config.MinQualifiedWidth && result.WidthMm <= _config.MaxQualifiedWidth) ? "T" : "F";
+                result.WidthQualified = (result.WidthMm >= config.MinQualifiedWidth && result.WidthMm <= config.MaxQualifiedWidth) ? "T" : "F";
             }
 
             return result;

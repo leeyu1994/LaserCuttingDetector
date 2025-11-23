@@ -149,7 +149,7 @@ namespace LaserCuttingDetector.ViewModels
         [ObservableProperty]
         private double _zoomFactor;
 
-        // 新增：用于在图像上绘制矩形框的集合
+        // 用于在图像上绘制矩形框的集合
         [ObservableProperty]
         private ObservableCollection<DrawableShape> _shapes;
 
@@ -165,7 +165,7 @@ namespace LaserCuttingDetector.ViewModels
         [ObservableProperty]
         private ComponentResult _selectedMisalignmentDefect;
 
-        // 【新增】当在UI上选中的压痕缺陷行改变时，将触发 OnSelectedIndentationDefectChanged 方法
+        // 当在UI上选中的压痕缺陷行改变时，将触发 OnSelectedIndentationDefectChanged 方法
         [ObservableProperty]
         private IndentationResult _selectedIndentationDefect;
 
@@ -176,7 +176,7 @@ namespace LaserCuttingDetector.ViewModels
         /// <param name="value">新的选中项</param>
         partial void OnSelectedBridgeDefectChanged(BridgeResult value)
         {
-            // 【修正】清除旧形状
+            // 清除旧形状
             Shapes.Clear();
 
             if (value != null)

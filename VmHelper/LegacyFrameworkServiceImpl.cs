@@ -1,6 +1,4 @@
-﻿// 文件: VmHelper/LegacyVisionServiceImpl.cs
-
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using ImageSourceModuleCs;

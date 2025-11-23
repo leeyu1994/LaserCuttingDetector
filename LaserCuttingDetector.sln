@@ -1,15 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.36511.14
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11217.181 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadDrawPic", "CadDrawPic\CadDrawPic.csproj", "{78D948C5-73A8-421E-986F-03725F78C63A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadDataExtractor", "CadDataExtractor\CadDataExtractor.csproj", "{2EACF491-425F-4E47-B353-0312DBA9950D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionLibrary", "ImageProcessor\VisionLibrary.csproj", "{1B352D28-7307-4229-B142-CE63374C156E}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DetectorTest", "DetectorTest\DetectorTest.csproj", "{DAAB56A4-5310-467E-9307-6E32DE172CA9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LaserCuttingDetector", "LaserCuttingDetector\LaserCuttingDetector.csproj", "{9862739E-8706-41C5-B038-996271AF95E5}"
 EndProject
@@ -35,10 +33,6 @@ Global
 		{1B352D28-7307-4229-B142-CE63374C156E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1B352D28-7307-4229-B142-CE63374C156E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1B352D28-7307-4229-B142-CE63374C156E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{DAAB56A4-5310-467E-9307-6E32DE172CA9}.Release|Any CPU.Build.0 = Release|Any CPU
 		{9862739E-8706-41C5-B038-996271AF95E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{9862739E-8706-41C5-B038-996271AF95E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9862739E-8706-41C5-B038-996271AF95E5}.Release|Any CPU.ActiveCfg = Release|Any CPU

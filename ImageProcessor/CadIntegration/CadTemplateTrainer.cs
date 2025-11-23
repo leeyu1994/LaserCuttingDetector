@@ -22,12 +22,29 @@ public class CadTemplateTrainer : IDisposable
         _config = config;
     }
 
+    private class TemplateModelSet : IDisposable
+    {
+        public HShapeModel CoarseModel { get; init; }
+        public HShapeModel FineModel { get; init; }
+        public List<PointF> TheoreticalCorners { get; init; } = new();
+        public PointF ImageCenter { get; init; }
+
+        public void Dispose()
+        {
+            CoarseModel?.Dispose();
+            FineModel?.Dispose();
+        }
+    }
+
     public HShapeModel? CoarseModel { get; private set; }
     public HShapeModel? FineModel { get; private set; }
     public List<PointF> TheoreticalCorners { get; private set; } = new();
     public PointF ImageCenter { get; private set; }
     public RectangleF CadBoundsMm { get; private set; }
     public List<PointF> CrossCentersMm { get; private set; } = new();
+
+    private TemplateModelSet? _frontModelSet;
+    private TemplateModelSet? _backlitModelSet;
 
     /// <summary>
     /// 主流程：加载 CAD -> 绘图 -> 生成 Halcon 模板。
@@ -69,16 +86,24 @@ public class CadTemplateTrainer : IDisposable
             using var fs = File.Open(templateOutputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
             data.SaveTo(fs);
         }
+
+        using var hImage = SkiaToHalcon(skImage);
+        _frontModelSet = TrainHalconModels(hImage, flipVertical: false);
+        CoarseModel = _frontModelSet.CoarseModel;
+        FineModel = _frontModelSet.FineModel;
+        TheoreticalCorners = _frontModelSet.TheoreticalCorners;
+        ImageCenter = _frontModelSet.ImageCenter;
+
         if (!string.IsNullOrEmpty(invertedTemplateOutputPath))
         {
             using var inverted = CreateInvertedAndFlippedImage(skImage);
             using var data = inverted.Encode(SKEncodedImageFormat.Png, 100);
             using var fs = File.Open(invertedTemplateOutputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
             data.SaveTo(fs);
-        }
-        using var hImage = SkiaToHalcon(skImage);
 
-        TrainHalconModels(hImage);
+            using var invertedHImage = SkiaToHalcon(inverted);
+            _backlitModelSet = TrainHalconModels(invertedHImage, flipVertical: true);
+        }
     }
 
     private RectangleF CalculateBoundsFromVerificationLines(List<LineElement> lines)
@@ -125,36 +150,44 @@ public class CadTemplateTrainer : IDisposable
         return (float)Math.Sqrt(dx * dx + dy * dy);
     }
 
-    private void TrainHalconModels(HImage image)
+    private TemplateModelSet TrainHalconModels(HImage image, bool flipVertical)
     {
         image.GetImageSize(out int width, out int height);
-        ImageCenter = new PointF(width / 2f, height / 2f);
+        var imageCenter = new PointF(width / 2f, height / 2f);
 
-        TheoreticalCorners = OrderCorners(
-            CrossCentersMm.Select(mm => MmToPixel(mm, CadBoundsMm, height)).ToList());
+        var theoreticalCorners = OrderCorners(
+            CrossCentersMm.Select(mm => MmToPixel(mm, CadBoundsMm, height, flipVertical)).ToList());
 
-        if (TheoreticalCorners.Count != 4)
-            throw new InvalidOperationException($"预期找到4个角点，实际计算出 {TheoreticalCorners.Count} 个");
+        if (theoreticalCorners.Count != 4)
+            throw new InvalidOperationException($"预期找到4个角点，实际计算出 {theoreticalCorners.Count} 个");
 
-        TrainCoarseModel(image);
-        TrainFineModel(image);
+        var coarseModel = TrainCoarseModel(image, imageCenter);
+        var fineModel = TrainFineModel(image, imageCenter, theoreticalCorners);
+
+        return new TemplateModelSet
+        {
+            CoarseModel = coarseModel,
+            FineModel = fineModel,
+            TheoreticalCorners = theoreticalCorners,
+            ImageCenter = imageCenter
+        };
     }
 
-    private void TrainCoarseModel(HImage image)
+    private HShapeModel TrainCoarseModel(HImage image, PointF imageCenter)
     {
         double halfSide = _config.CoarseRegionSizeMm / _config.PixelSizeMm / 2.0;
 
         using var region = new HRegion();
         region.GenRectangle1(
-            ImageCenter.Y - halfSide,
-            ImageCenter.X - halfSide,
-            ImageCenter.Y + halfSide,
-            ImageCenter.X + halfSide);
+            imageCenter.Y - halfSide,
+            imageCenter.X - halfSide,
+            imageCenter.Y + halfSide,
+            imageCenter.X + halfSide);
 
         using var reduced = image.ReduceDomain(region);
 
-        CoarseModel = new HShapeModel();
-        CoarseModel.CreateShapeModel(
+        var coarseModel = new HShapeModel();
+        coarseModel.CreateShapeModel(
             reduced,
             "auto",
             -_config.AngleSearchRangeRad,
@@ -164,12 +197,14 @@ public class CadTemplateTrainer : IDisposable
             "use_polarity",
             "auto",
             "auto");
+
+        return coarseModel;
     }
 
-    private void TrainFineModel(HImage image)
+    private HShapeModel TrainFineModel(HImage image, PointF imageCenter, List<PointF> theoreticalCorners)
     {
         double halfSide = _config.FineRegionSizeMm / _config.PixelSizeMm / 2.0;
-        var crossCenter = TheoreticalCorners[0]; // 左上
+        var crossCenter = theoreticalCorners[0]; // 左上
 
         using var region = new HRegion();
         region.GenRectangle1(
@@ -180,8 +215,8 @@ public class CadTemplateTrainer : IDisposable
 
         using var reduced = image.ReduceDomain(region);
 
-        FineModel = new HShapeModel();
-        FineModel.CreateShapeModel(
+        var fineModel = new HShapeModel();
+        fineModel.CreateShapeModel(
             reduced,
             "auto",
             -_config.AngleSearchRangeRad,
@@ -191,12 +226,18 @@ public class CadTemplateTrainer : IDisposable
             "use_polarity",
             "auto",
             "auto");
+
+        return fineModel;
     }
 
-    private PointF MmToPixel(PointF mmPoint, RectangleF boundsMm, int imageHeight)
+    private PointF MmToPixel(PointF mmPoint, RectangleF boundsMm, int imageHeight, bool flipVertical)
     {
         float px = (mmPoint.X - boundsMm.Left + _config.CanvasMarginMm) / _config.PixelSizeMm;
         float py = imageHeight - (mmPoint.Y - boundsMm.Top + _config.CanvasMarginMm) / _config.PixelSizeMm;
+        if (flipVertical)
+        {
+            py = imageHeight - py;
+        }
         return new PointF(px, py);
     }
 
@@ -239,6 +280,18 @@ public class CadTemplateTrainer : IDisposable
         };
     }
 
+    internal (HShapeModel Coarse, HShapeModel Fine, List<PointF> Corners, PointF Center) GetModelSet(bool useBacklight)
+    {
+        var selected = useBacklight && _backlitModelSet != null
+            ? _backlitModelSet
+            : _frontModelSet;
+
+        if (selected == null)
+            throw new InvalidOperationException("请先调用 GenerateTemplates 生成定位模板。");
+
+        return (selected.CoarseModel, selected.FineModel, selected.TheoreticalCorners, selected.ImageCenter);
+    }
+
     private PointF GetCentroid(List<PointF> pts)
     {
         if (!pts.Any()) return PointF.Empty;
@@ -262,8 +315,12 @@ public class CadTemplateTrainer : IDisposable
     {
         CoarseModel?.Dispose();
         FineModel?.Dispose();
+        _frontModelSet?.Dispose();
+        _backlitModelSet?.Dispose();
         CoarseModel = null;
         FineModel = null;
+        _frontModelSet = null;
+        _backlitModelSet = null;
     }
 
     public void Dispose()

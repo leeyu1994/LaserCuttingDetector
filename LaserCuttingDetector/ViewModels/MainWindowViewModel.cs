@@ -678,7 +678,7 @@ namespace LaserCuttingDetector.ViewModels
                     using var hImage = new HImage(tempPath);
                     File.Delete(tempPath);
 
-                    var matchResult = _runtimeLocator.Locate(hImage);
+                    var matchResult = _runtimeLocator.Locate(hImage, useBacklight);
                     if (matchResult.Corners.Length < 4)
                     {
                         Application.Current.Dispatcher.Invoke(() =>

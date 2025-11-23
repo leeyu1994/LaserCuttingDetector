@@ -32,7 +32,7 @@ public class CadTemplateTrainer : IDisposable
     /// <summary>
     /// 主流程：加载 CAD -> 绘图 -> 生成 Halcon 模板。
     /// </summary>
-    public void GenerateTemplates(string csvPath, string? templateOutputPath = null)
+    public void GenerateTemplates(string csvPath, string? templateOutputPath = null, string? invertedTemplateOutputPath = null)
     {
         DisposeModels();
 
@@ -67,6 +67,13 @@ public class CadTemplateTrainer : IDisposable
         {
             using var data = skImage.Encode(SKEncodedImageFormat.Png, 100);
             using var fs = File.Open(templateOutputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            data.SaveTo(fs);
+        }
+        if (!string.IsNullOrEmpty(invertedTemplateOutputPath))
+        {
+            using var inverted = CreateInvertedAndFlippedImage(skImage);
+            using var data = inverted.Encode(SKEncodedImageFormat.Png, 100);
+            using var fs = File.Open(invertedTemplateOutputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
             data.SaveTo(fs);
         }
         using var hImage = SkiaToHalcon(skImage);
@@ -191,6 +198,31 @@ public class CadTemplateTrainer : IDisposable
         float px = (mmPoint.X - boundsMm.Left + _config.CanvasMarginMm) / _config.PixelSizeMm;
         float py = imageHeight - (mmPoint.Y - boundsMm.Top + _config.CanvasMarginMm) / _config.PixelSizeMm;
         return new PointF(px, py);
+    }
+
+    private SKImage CreateInvertedAndFlippedImage(SKImage source)
+    {
+        var info = source.Info;
+        using var surface = SKSurface.Create(info);
+        var canvas = surface.Canvas;
+
+        canvas.Translate(0, info.Height);
+        canvas.Scale(1, -1);
+
+        using var paint = new SKPaint
+        {
+            ColorFilter = SKColorFilter.CreateColorMatrix(new[]
+            {
+                -1f, 0, 0, 0, 255f,
+                0, -1f, 0, 0, 255f,
+                0, 0, -1f, 0, 255f,
+                0, 0, 0, 1, 0
+            })
+        };
+
+        canvas.DrawImage(source, 0, 0, paint);
+        canvas.Flush();
+        return surface.Snapshot();
     }
 
     private List<PointF> OrderCorners(List<PointF> centers)

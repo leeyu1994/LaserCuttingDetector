@@ -18,9 +18,9 @@ namespace VisionLibrary.CadIntegration.Services
         /// <summary>
         /// 加载CAD数据CSV文件
         /// </summary>
-        public List<Dictionary<string, string>> LoadCADData()
+        public List<Dictionary<string, string>> LoadCADData(string? csvPath = null)
         {
-            string filePath = Path.Combine(CADConfig.DataDir, CADConfig.CAD_DATA_FILE);
+            string filePath = csvPath ?? Path.Combine(CADConfig.DataDir, CADConfig.CAD_DATA_FILE);
 
             if (!File.Exists(filePath))
             {
@@ -200,6 +200,8 @@ namespace VisionLibrary.CadIntegration.Services
 
             // 查找对象类型列名（支持不同的列名变体）
             string objectTypeColumn = FindObjectTypeColumn(records[0].Keys);
+            string componentIdColumn = FindColumn(records[0], "部件ID", "组件ID", "component_id", "component");
+            string objectHandleColumn = FindColumn(records[0], "对象句柄", "句柄", "handle", "object_handle", "id");
             if (string.IsNullOrEmpty(objectTypeColumn))
             {
                 Console.WriteLine("错误: 无法找到对象类型列");
@@ -233,11 +235,16 @@ namespace VisionLibrary.CadIntegration.Services
                     Console.WriteLine($"第{idx + 1}行: 对象类型=[{elemType}]");
                 }
 
+                string componentId = GetValue(record, componentIdColumn);
+                string handle = GetValue(record, objectHandleColumn);
+
                 if (elemType == "LINE")
                 {
                     var line = ExtractLineElement(record, idx + 1);
                     if (line != null)
                     {
+                        line.ComponentId = componentId;
+                        line.Id = handle;
                         elements.Add(line);
                         allX.AddRange(new[] { line.Start.X, line.End.X });
                         allY.AddRange(new[] { line.Start.Y, line.End.Y });
@@ -249,6 +256,8 @@ namespace VisionLibrary.CadIntegration.Services
                     var arc = ExtractArcElement(record, idx + 1);
                     if (arc != null)
                     {
+                        arc.ComponentId = componentId;
+                        arc.Id = handle;
                         elements.Add(arc);
                         allX.Add(arc.Center.X);
                         allY.Add(arc.Center.Y);
@@ -260,6 +269,8 @@ namespace VisionLibrary.CadIntegration.Services
                     var circle = ExtractCircleElement(record, idx + 1);
                     if (circle != null)
                     {
+                        circle.ComponentId = componentId;
+                        circle.Id = handle;
                         elements.Add(circle);
                         allX.Add(circle.Center.X);
                         allY.Add(circle.Center.Y);
@@ -472,6 +483,15 @@ namespace VisionLibrary.CadIntegration.Services
 
             string valueStr = record[key].Trim();
             return float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// 安全获取指定列的值，缺失时返回空字符串。
+        /// </summary>
+        private string GetValue(Dictionary<string, string> record, string? columnName)
+        {
+            if (string.IsNullOrEmpty(columnName)) return string.Empty;
+            return record.TryGetValue(columnName, out var value) ? value.Trim() : string.Empty;
         }
     }
 }

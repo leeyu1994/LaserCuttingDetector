@@ -8,6 +8,8 @@ namespace VisionLibrary.CadIntegration.Models
     public abstract class CADElement
     {
         public string Type { get; set; } = string.Empty;
+        public string Id { get; set; } = string.Empty;
+        public string ComponentId { get; set; } = string.Empty;
         public abstract float CalculateLength();
     }
 

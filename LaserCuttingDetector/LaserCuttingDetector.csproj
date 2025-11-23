@@ -20,20 +20,19 @@
     <PackageReference Include="devexpress.wpf.ribbon" Version="24.2.8" />
     <PackageReference Include="DevExpress.Wpf.ThemesLW" Version="24.2.8" />
     <PackageReference Include="DevExpress.Mvvm.CodeGenerators" Version="22.1.*-*" />
-    <PackageReference Include="Google.Protobuf" Version="3.33.0" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.72.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="HslCommunication" Version="12.5.2" />
     <PackageReference Include="OpenCvSharp4" Version="4.11.0.20250507" />
     <PackageReference Include="System.Drawing.Common" Version="9.0.10" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GrpcContracts\GrpcContracts.csproj" />
     <ProjectReference Include="..\ImageProcessor\VisionLibrary.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="halcondotnet">
+      <HintPath>C:\Program Files\MVTec\HALCON-24.05-Progress\bin\dotnet35\halcondotnet.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,7 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DevExpress.Mvvm;
-using LaserCuttingDetector.Commons;
 using LaserCuttingDetector.Dialogs;
 using LaserCuttingDetector.Models;
 using LaserCuttingDetector.UserControls;
@@ -22,9 +21,12 @@ using System.Windows;
 using System.Windows.Media;
 using VisionLibrary;
 using VisionLibrary.Models;
+using VisionLibrary.CadIntegration;
+using VisionLibrary.CadIntegration.Config;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using LogManager = LaserCuttingDetector.Models.LogManager;
 using Point = System.Windows.Point;
+using HalconDotNet;
 
 namespace LaserCuttingDetector.ViewModels
 {
@@ -71,6 +73,10 @@ namespace LaserCuttingDetector.ViewModels
         private Image _diffImage;
         private Image _regionImage;
         private Image _originImage;
+        private CadTemplateTrainer _cadTemplateTrainer;
+        private RuntimeLocator _runtimeLocator;
+        private CadTemplateConfig _cadTemplateConfig;
+        private string _generatedCadTemplatePath;
 
         // 定义一个常量用于控制选中项的放大倍数
         private const double DefaultZoomFactor = 2.5;
@@ -315,8 +321,6 @@ namespace LaserCuttingDetector.ViewModels
         [RelayCommand]
         private async void ViewLoadAsync()
         {
-            StartGrpcServer();
-
             // 【修改】初始化本地相机
             _cameraController = new CameraController();
             // 订阅日志事件，直接在UI上显示相机日志
@@ -346,12 +350,6 @@ namespace LaserCuttingDetector.ViewModels
             _cameraController?.Dispose();
             _cameraController = null;
 
-            // 停止 gRPC 服务器
-            StopGrpcServer();
-
-            // 释放客户端资源
-            GrpcClientService.Instance.Dispose();
-
             // 清理本地图像资源
             lock (_imageLock)
             {
@@ -372,6 +370,9 @@ namespace LaserCuttingDetector.ViewModels
             _mainImage = null;
 
             _imageInspector?.Dispose();
+            _cadTemplateTrainer?.Dispose();
+            _cadTemplateTrainer = null;
+            _runtimeLocator = null;
         }
 
         private void DisposeImageSafely(ref Image image)
@@ -507,24 +508,7 @@ namespace LaserCuttingDetector.ViewModels
             {
                 // 克隆图像，因为原始 bitmap 很快会被相机SDK回收
                 using var imageClone = (Bitmap)receivedBitmap.Clone();
-
-                // 将 Bitmap 转换为 byte[]
-                byte[] imageBytes;
-                using (var ms = new MemoryStream())
-                {
-                    // 使用 Bmp 格式，因为它无损且快速
-                    imageClone.Save(ms, ImageFormat.Bmp);
-                    imageBytes = ms.ToArray();
-                }
-
-                // 通过 gRPC 将字节数据发送到服务器进行处理
-                var result = await GrpcClientService.Instance.ProcessImageFromBytesStreamedAsync(imageBytes);
-
-                // 在UI线程上处理返回的结果
-                await Application.Current.Dispatcher.InvokeAsync(async () =>
-                {
-                    await ProcessVisionResultAsync(result);
-                });
+                await ProcessLocalBitmapAsync(imageClone);
             };
 
             // 2. 订阅事件
@@ -631,13 +615,14 @@ namespace LaserCuttingDetector.ViewModels
             IsWaitIndicatorVisible = true;
             WaitIndicatorText = "处理本地图像中，请稍候...";
 
-            // 2. 调用新的gRPC流式方法，直接传递图像的字节数据
-            // 1. 将文件完整读取到字节数组中
-            byte[] imageBytes = await File.ReadAllBytesAsync(selectedFilePath);
-            var result = await GrpcClientService.Instance.ProcessImageFromBytesStreamedAsync(imageBytes);
+            using var bitmap = SafeLoadImage(selectedFilePath);
+            if (bitmap == null)
+            {
+                IsWaitIndicatorVisible = false;
+                return;
+            }
 
-            // 调用更新后的 ProcessVisionResultAsync
-            await ProcessVisionResultAsync(result);
+            await ProcessLocalBitmapAsync((Bitmap)bitmap.Clone());
 
             IsWaitIndicatorVisible = false;
         }
@@ -651,164 +636,115 @@ namespace LaserCuttingDetector.ViewModels
         ];
 
         /// <summary>
-        /// 处理视觉检测结果的通用方法（已适配流式传输）
+        /// 本地执行模板定位 + 视觉检测。
         /// </summary>
-        /// <param name="result">包含元数据和结果图像的流式处理结果对象</param>
-        private async Task ProcessVisionResultAsync(ProcessStreamedResult result)
+        private async Task ProcessLocalBitmapAsync(Bitmap analysisBitmap)
         {
-            // 步骤 1: 基本有效性检查
-            if (result?.Metadata == null)
-            {
-                // 如果结果或元数据为空，则无法继续，释放可能存在的图像资源
-                result?.ResultImage?.Dispose();
-                LogManager.Instance.Error("ProcessVisionResultAsync 收到无效的 null 结果或元数据。");
-                return;
-            }
-
-            // 从结果对象中提取元数据和待分析的图像
-            var metadata = result.Metadata;
-            var analysisBitmap = result.ResultImage;
-
-            // 将所有耗时操作放入后台线程，避免UI卡顿
             await Task.Run(() =>
             {
-                // 步骤 2: 检查服务端（VM流程）是否成功执行
-                if (!metadata.Success)
+                if (_imageInspector == null || _runtimeLocator == null)
                 {
-                    // 如果服务端失败，在UI线程显示错误信息并终止
+                    analysisBitmap?.Dispose();
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        MessageBoxService.ShowMessage($"服务器端处理失败: {metadata.Message}", "错误", MessageButton.OK, MessageIcon.Error);
-                        LogManager.Instance.Error($"服务器端视觉处理失败: {metadata.Message}");
+                        MessageBoxService.ShowMessage("本地检测库或模板未初始化，请先选择产品。", "错误", MessageButton.OK, MessageIcon.Error);
                     });
-                    // 确保释放图像资源，防止内存泄漏
-                    analysisBitmap?.Dispose();
                     return;
                 }
 
-                // 步骤 3: 检查在客户端进行详细检测所需的所有前提条件
-                if (_imageInspector == null || analysisBitmap == null || metadata.CornerPoints.Count < 4)
-                {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        string errorMsg = "执行本地检测失败：\n";
-                        if (_imageInspector == null)
-                            errorMsg += "- 本地检测库未初始化，请先选择产品。\n";
-                        if (analysisBitmap == null)
-                            errorMsg += "- 服务器未返回有效的图像数据。\n";
-                        if (metadata.CornerPoints.Count < 4)
-                            errorMsg += $"- 服务器返回的角点数量不足 ({metadata.CornerPoints.Count})。";
-
-                        MessageBoxService.ShowMessage(errorMsg, "前提条件不足", MessageButton.OK, MessageIcon.Error);
-                        LogManager.Instance.Error(errorMsg.Replace("\n", " "));
-                    });
-                    analysisBitmap?.Dispose();
-                    return;
-                }
-
-                // 步骤 4: 执行核心检测算法，并正确管理资源
-                // 使用 using 语句确保 analysisBitmap 和转换后的 sourceMat 在使用后被自动释放
                 using (analysisBitmap)
-                using (var sourceMat = analysisBitmap.ToMat())
                 {
-                    var cornerPoints = metadata.CornerPoints
-                                               .Select(p => new Point2f(p.X, p.Y))
-                                               .ToArray();
+                    // 1. 使用 Halcon 模板匹配定位四角
+                    string tempPath = Path.GetTempFileName() + ".png";
+                    analysisBitmap.Save(tempPath, ImageFormat.Png);
+                    using var hImage = new HImage(tempPath);
+                    File.Delete(tempPath);
 
-                    // 4.1 运行本地检测
-                    InspectionResult localInspectionResult = _imageInspector.Run(sourceMat, cornerPoints);
+                    var match = _runtimeLocator.Locate(hImage);
+                    if (match.Corners.Length < 4)
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            MessageBoxService.ShowMessage("未能找到足够的定位角点。", "提示", MessageButton.OK, MessageIcon.Warning);
+                        });
+                        return;
+                    }
 
-                    // ########## 最终修正点: 增强筛选逻辑 ##########
-                    // 使用 StringComparison.OrdinalIgnoreCase 来忽略大小写，更加健壮。
-                    // 只有被视觉库判定为不合格(NG)的结果才会被添加到缺陷列表。
+                    // 2. 执行本地检测
+                    using var sourceMat = analysisBitmap.ToMat();
+                    var cornerPoints = match.Corners.Select(p => new Point2f(p.X, p.Y)).ToArray();
+                    var localInspectionResult = _imageInspector.Run(sourceMat, cornerPoints);
 
-                    // 筛选桥位缺陷：Result 属性为 "F"
                     var bridgeDefectsToAdd = localInspectionResult?.DetectedBridges
                         .Where(b => "F".Equals(b.Result, StringComparison.OrdinalIgnoreCase))
                         .ToList() ?? new List<BridgeResult>();
 
-                    // 【修改】获取聚合后的宽度缺陷
                     var widthDefectsToAdd = localInspectionResult?.AggregatedWidthDefects ?? new List<AggregatedWidthDefect>();
-
-                    // ########## 在这里添加新的处理逻辑 ##########
-                    // 遍历所有宽度缺陷，计算并填充新增的属性
                     foreach (var defect in widthDefectsToAdd)
                     {
-                        // 检查点集是否有效，防止后续操作出错
                         if (defect.DefectShapePoints != null && defect.DefectShapePoints.Length > 0)
                         {
-                            // 2. 计算缺陷的物理长度（毫米）
                             double pixelLength = 0;
-                            // 遍历点集，累加每两个相邻点之间的距离
                             for (int i = 0; i < defect.DefectShapePoints.Length - 1; i++)
                             {
-                                // 使用OpenCvSharp的Point类内置的DistanceTo方法计算欧氏距离
                                 pixelLength += defect.DefectShapePoints[i].DistanceTo(defect.DefectShapePoints[i + 1]);
                             }
-                            // 将总像素长度乘以像素尺寸，得到物理长度
                             defect.LengthMm = pixelLength * _pixelSize;
                         }
                     }
 
-                    // 筛选错位缺陷：Result 属性为 "F"
                     var componentDefectsToAdd = localInspectionResult?.DetectedComponents
                         .Where(c => "F".Equals(c.Result, StringComparison.OrdinalIgnoreCase))
                         .ToList() ?? new List<ComponentResult>();
 
-                    // 【新增】筛选压痕缺陷：Result 属性为 "F"
                     var indentationDefectsToAdd = localInspectionResult?.DetectedIndentations
                         .Where(i => "F".Equals(i.Result, StringComparison.OrdinalIgnoreCase))
                         .ToList() ?? new List<IndentationResult>();
 
-                    // 4.2 将Bitmap转换为线程安全的Bitmap对象用于UI显示
                     var displayImage = (Bitmap)localInspectionResult.AlignedImage.ToBitmap().Clone();
 
-
-                    // 步骤 5: 切换到UI线程，进行纯粹的UI更新操作
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        // 5.1 更新图像
-                        // 首先释放旧的图像资源
                         if (MainImage is IDisposable disposableOldImage)
                         {
                             disposableOldImage.Dispose();
                         }
 
-                        // 然后赋新值。PictureViewer会接收到这个新的Bitmap对象。
                         ShouldResetImageView = true;
                         MainImage = displayImage;
                         _regionImage = (Bitmap)displayImage.Clone();
 
-                        // 5.2 修正表格绑定并更新
-                        // 清空旧的缺陷列表
                         BridgeDefects.Clear();
                         WidthDefects.Clear();
                         MisalignmentDefects.Clear();
-                        IndentationDefects.Clear(); // 【新增】清空压痕缺陷列表
+                        IndentationDefects.Clear();
                         Shapes.Clear();
 
-                        // 添加筛选后的缺陷列表
                         foreach (var bridge in bridgeDefectsToAdd) BridgeDefects.Add(bridge);
                         foreach (var width in widthDefectsToAdd) WidthDefects.Add(width);
                         foreach (var component in componentDefectsToAdd) MisalignmentDefects.Add(component);
-                        foreach (var indentation in indentationDefectsToAdd) IndentationDefects.Add(indentation); // 【新增】添加压痕缺陷
+                        foreach (var indentation in indentationDefectsToAdd) IndentationDefects.Add(indentation);
 
-                        // 5.4 显示报告
+                        var fineScoreText = string.Join(", ", match.FineScores.Select(score => score.ToString("F2")));
+
                         string report = $"检测完成!\n" +
-                                    $"服务端耗时: {metadata.ProcessTimeSeconds:F2} 秒\n" +
-                                    $"客户端耗时: {localInspectionResult?.ProcessTimeSeconds ?? 0:F2} 秒\n" +
-                                    $"------ 客户端检测结果 ------\n" +
-                                    $"桥位缺陷: {bridgeDefectsToAdd.Count} 处\n" +
-                                    $"宽度缺陷: {widthDefectsToAdd.Count} 段\n" +
-                                    $"错位缺陷: {componentDefectsToAdd.Count} 处\n" + // 【修改】在末尾添加换行符
-                                    $"压痕缺陷: {indentationDefectsToAdd.Count} 处"; // 【新增】在报告中显示压痕缺陷数量
+                                        $"------ 模板匹配 ------\n" +
+                                        $"粗定位得分: {match.CoarseScore:F2}\n" +
+                                        $"精定位得分: {fineScoreText}\n" +
+                                        $"------ 客户端检测结果 ------\n" +
+                                        $"桥位缺陷: {bridgeDefectsToAdd.Count} 处\n" +
+                                        $"宽度缺陷: {widthDefectsToAdd.Count} 段\n" +
+                                        $"错位缺陷: {componentDefectsToAdd.Count} 处\n" +
+                                        $"压痕缺陷: {indentationDefectsToAdd.Count} 处";
 
                         MessageBoxService.ShowMessage(report, "检测报告");
-                        LogManager.Instance.Info($"视觉检测流程全部完成。服务端消息: {metadata.Message}");
+                        LogManager.Instance.Info("视觉检测流程全部完成（本地）。");
                     });
                 }
             });
-        }        /// <summary>
+        }
+
+        /// <summary>
                  /// 检查文件是否为支持的图像格式
                  /// </summary>
                  /// <param name="filePath">文件路径</param>
@@ -855,39 +791,26 @@ namespace LaserCuttingDetector.ViewModels
 
         private async Task LoadProduct(string name)
         {
-            // ########## 第一部分：加载 .sol 方案文件 (与原来相同) ##########
             var solutionBasePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Solutions");
             var productPath = Path.Combine(solutionBasePath, name);
-            var solPath = Path.Combine(productPath, "Demo.sol");
-
-            if (!File.Exists(solPath))
-            {
-                MessageBoxService.ShowMessage("方案文件(.sol)不存在，请核对后重试");
-                return;
-            }
-
-            var result = await GrpcClientService.Instance.LoadSolutionAsync(solPath);
-            if (!result.Success)
-            {
-                MessageBoxService.ShowMessage($"方案加载失败: {result.Message}", "错误", MessageButton.OK, MessageIcon.Error);
-                // 即使方案加载失败，也可能需要继续加载检测配置，所以不在此处返回
-            }
-            else
-            {
-                LogManager.Instance.Info($"方案 '{name}' 加载成功。");
-            }
-
-            // ########## 第二部分：加载图像检测库相关配置 (新逻辑) ##########
 
             // 释放上一个产品的检测库实例
             _imageInspector?.Dispose();
             _imageInspector = null;
+            _cadTemplateTrainer?.Dispose();
+            _cadTemplateTrainer = null;
+            _runtimeLocator = null;
 
             // 定义产品目录下的配置文件路径
             string configPath = Path.Combine(productPath, "config.json");
             string cadCsvPath = Path.Combine(productPath, "cad_data.csv");
-            string cadTemplateImagePath = Path.Combine(productPath, "cad_template.jpg");
-            _originImage = new Bitmap(cadTemplateImagePath);
+            _generatedCadTemplatePath = Path.Combine(productPath, "cad_template_generated.png");
+
+            if (!File.Exists(cadCsvPath))
+            {
+                MessageBoxService.ShowMessage("cad_data.csv 不存在，请先导出 CAD 数据。");
+                return;
+            }
             // 检查 config.json 是否存在，如果不存在则自动生成一个默认的
             if (!File.Exists(configPath))
             {
@@ -904,9 +827,9 @@ namespace LaserCuttingDetector.ViewModels
             }
 
             // 检查其他必要文件是否存在
-            if (!File.Exists(cadCsvPath) || !File.Exists(cadTemplateImagePath))
+            if (!File.Exists(cadCsvPath))
             {
-                var msg = $"初始化产品 '{name}' 失败：缺少 'cad_data.csv' 或 'cad_template.jpg' 文件。\n请确保它们位于产品目录下：\n{productPath}";
+                var msg = $"初始化产品 '{name}' 失败：缺少 'cad_data.csv'。\n请确保它位于产品目录下：\n{productPath}";
                 LogManager.Instance.Error(msg);
                 MessageBoxService.ShowMessage(msg, "配置错误", MessageButton.OK, MessageIcon.Error);
                 return; // 缺少关键文件，无法继续初始化
@@ -926,10 +849,21 @@ namespace LaserCuttingDetector.ViewModels
             // 更新像素尺寸
             _pixelSize = config.PixelSize;
 
+            // 生成 CAD 模板并训练 Halcon 模型
+            _cadTemplateConfig = new CadTemplateConfig
+            {
+                PixelSizeMm = (float)_currentConfig.PixelSize,
+                CanvasMarginMm = (float)_currentConfig.CuttingFrame
+            };
+            _cadTemplateTrainer = new CadTemplateTrainer(_cadTemplateConfig);
+            _cadTemplateTrainer.GenerateTemplates(cadCsvPath, _generatedCadTemplatePath);
+            _runtimeLocator = new RuntimeLocator(_cadTemplateTrainer, _cadTemplateConfig);
+
             // 初始化图像检测库
             _imageInspector = new ImageInspectionLibrary();
-            _imageInspector.Init(configPath, cadCsvPath, cadTemplateImagePath);
-            LogManager.Instance.Info($"产品 '{name}' 的图像检测库初始化成功。");
+            _imageInspector.Init(configPath, cadCsvPath, _generatedCadTemplatePath);
+            LogManager.Instance.Info($"产品 '{name}' 的图像检测库初始化成功，并已生成定位模板。");
+            _originImage = new Bitmap(_generatedCadTemplatePath);
         }
 
 
@@ -951,94 +885,6 @@ namespace LaserCuttingDetector.ViewModels
                 LogManager.Instance.Info("本地相机初始化成功。");
             }
         }
-        #endregion
-
-        #region 辅助方法 (这部分方法与MVVM框架无关，无需改动)
-
-        // 新增：启动 gRPC 服务进程的方法
-
-        private Process _grpcServerProcess; // 新增：用于持有 gRPC 服务进程的引用
-
-        // 定义与服务端完全相同的事件名称
-        private const string ShutdownEventName = "Global\\LaserCuttingGrpcServerShutdownEvent";
-
-        private void StartGrpcServer()
-        {
-            const string serverExeName = "VmHelper.exe"; // 你的gRPC服务端exe文件名
-            // 假设服务端exe放在主程序目录下的 "grpc_server" 文件夹中
-            string serverPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "grpc_server", serverExeName);
-
-            if (!File.Exists(serverPath))
-            {
-                MessageBoxService.ShowMessage($"无法找到gRPC服务程序: {serverPath}\n请确保它存在。", "错误", MessageButton.OK, MessageIcon.Error);
-                return;
-            }
-
-            // 检查进程是否已在运行 (以防上次未正常关闭)
-            var existingProcess = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(serverExeName)).FirstOrDefault();
-            if (existingProcess != null)
-            {
-                // 如果已在运行，先尝试正常关闭它
-                StopGrpcServer(existingProcess);
-            }
-
-            var startInfo = new ProcessStartInfo(serverPath)
-            {
-                // 以下设置为后台运行所必须
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = false
-            };
-
-            _grpcServerProcess = Process.Start(startInfo);
-            LogManager.Instance.Info($"已启动 gRPC 服务进程，ID: {_grpcServerProcess.Id}");
-        }
-
-        // 新增：停止 gRPC 服务进程的方法
-        private void StopGrpcServer()
-        {
-            StopGrpcServer(_grpcServerProcess); // 调用重载方法
-        }
-
-
-
-        // 新增：停止 gRPC 服务进程的重载方法
-        private void StopGrpcServer(Process process)
-        {
-            if (process == null || process.HasExited)
-            {
-                return;
-            }
-
-            // 使用 EventWaitHandle 发送关闭信号
-            if (EventWaitHandle.TryOpenExisting(ShutdownEventName, out EventWaitHandle shutdownEvent))
-            {
-                using (shutdownEvent)
-                {
-                    LogManager.Instance.Info($"正在向 gRPC 服务进程 (ID: {process.Id}) 发送关闭信号...");
-                    shutdownEvent.Set(); // 触发事件
-                }
-
-                // 等待进程退出，设置一个超时时间（例如5秒）
-                if (process.WaitForExit(5000))
-                {
-                    LogManager.Instance.Info("gRPC 服务进程已成功关闭。");
-                }
-                else
-                {
-                    LogManager.Instance.Warn("gRPC 服务进程在超时后仍未关闭，将强制终止。");
-                    process.Kill(); // 如果无法正常关闭，则强制终止
-                }
-            }
-            else
-            {
-                LogManager.Instance.Warn($"无法找到名为 '{ShutdownEventName}' 的关闭事件句柄，将直接终止进程。");
-                process.Kill();
-            }
-
-            process.Dispose();
-        }
-
         #endregion
 
         /// <summary>

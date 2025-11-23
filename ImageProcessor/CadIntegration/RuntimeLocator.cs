@@ -1,72 +1,139 @@
-﻿using HalconDotNet;
+using System;
 using System.Drawing;
+using System.Linq;
+using HalconDotNet;
+using VisionLibrary.CadIntegration.Config;
 
-namespace VisionLibrary.CadIntegration
+namespace VisionLibrary.CadIntegration;
+
+public class RuntimeLocator
 {
-    public class RuntimeLocator
+    private readonly CadTemplateTrainer _trainer;
+    private readonly CadTemplateConfig _config;
+
+    public RuntimeLocator(CadTemplateTrainer trainer, CadTemplateConfig config)
     {
-        private readonly CadTemplateTrainer _trainer; // 持有训练好的模型
-
-        public RuntimeLocator(CadTemplateTrainer trainer)
-        {
-            _trainer = trainer;
-        }
-
-        /// <summary>
-        /// 对真实图片进行定位
-        /// </summary>
-        public List<PointF> Locate(HImage sceneImage)
-        {
-            var resultPoints = new List<PointF>();
-
-            // 1. 粗定位 (找中心)
-            // 参数可根据实际情况提取到 Config 中
-            _trainer.CoarseModel.FindShapeModel(sceneImage, -0.5, 1.0, 0.5, 1, 0.5, "least_squares", 0, 0.9,
-                out HTuple row, out HTuple col, out HTuple angle, out HTuple score);
-
-            if (score.Length == 0) return resultPoints; // 失败
-
-            // 2. 计算变换矩阵 (从 模板中心 -> 实际中心)
-            HHomMat2D mat = new HHomMat2D();
-            mat.VectorToRigid(
-                new HTuple(_trainer.ImageCenter.Y), new HTuple(_trainer.ImageCenter.X), new HTuple(0.0),
-                row, col, angle
-            );
-
-            // 3. 遍历4个理论角点，进行精定位
-            foreach (var corner in _trainer.TheoreticalCorners)
-            {
-                // 3.1 预测位置
-                HTuple expectedRow = mat.AffineTransPoint2d(corner.Y, corner.X, out HTuple expectedCol);
-
-                // 3.2 截取搜索区域 (ROI)
-                HRegion searchRegion = new HRegion();
-                searchRegion.GenRectangle1(
-                    expectedRow - 50, expectedCol - 50, // 假设搜索范围 +/- 50像素
-                    expectedRow + 50, expectedCol + 50
-                );
-
-                HImage reducedImage = sceneImage.ReduceDomain(searchRegion);
-
-                // 3.3 精定位 (找十字线)
-                _trainer.FineModel.FindShapeModel(reducedImage, -0.2, 0.4, 0.4, 1, 0.5, "least_squares", 0, 0.7,
-                     out HTuple cRow, out HTuple cCol, out HTuple cAngle, out HTuple cScore);
-
-                if (cScore.Length > 0)
-                {
-                    resultPoints.Add(new PointF((float)cCol.D, (float)cRow.D)); // Halcon是Row(Y),Col(X)
-                }
-                else
-                {
-                    // 没找到则使用预测值
-                    resultPoints.Add(new PointF((float)expectedCol.D, (float)expectedRow.D));
-                }
-
-                searchRegion.Dispose();
-                reducedImage.Dispose();
-            }
-
-            return resultPoints;
-        }
+        _trainer = trainer;
+        _config = config;
     }
+
+    /// <summary>
+    /// 对真实图片进行定位，返回四角坐标（顺序：左上、右上、右下、左下）。
+    /// </summary>
+    public TemplateMatchResult Locate(HImage sceneImage)
+    {
+        if (_trainer.CoarseModel is null || _trainer.FineModel is null)
+            throw new InvalidOperationException("请先调用 CadTemplateTrainer.GenerateTemplates 生成模板。");
+
+        var result = new TemplateMatchResult();
+
+        _trainer.CoarseModel.FindShapeModel(
+            sceneImage,
+            -_config.AngleSearchRangeRad,
+            _config.AngleSearchRangeRad,
+            0.5,
+            1,
+            _config.CoarseMinScore,
+            "least_squares",
+            0,
+            _config.CoarseMinScore,
+            out HTuple row,
+            out HTuple col,
+            out HTuple angle,
+            out HTuple score);
+
+        if (score.Length == 0)
+        {
+            return result;
+        }
+
+        result.CoarseScore = score.D;
+
+        var mat = new HHomMat2D();
+        mat.VectorAngleToRigid(
+            new HTuple(_trainer.ImageCenter.Y),
+            new HTuple(_trainer.ImageCenter.X),
+            new HTuple(0.0),
+            row,
+            col,
+            angle);
+
+        var expectedCorners = _trainer.TheoreticalCorners
+            .Select(corner =>
+            {
+                HTuple r = mat.AffineTransPoint2d(corner.Y, corner.X, out HTuple c);
+                return new PointF((float)c.D, (float)r.D);
+            })
+            .ToList();
+
+        var searchHalf = (_config.FineRegionSizeMm / _config.PixelSizeMm) / 2.0 +
+                         _config.FineSearchMarginMm / _config.PixelSizeMm;
+
+        var fineScores = new List<double>();
+        var finalCorners = new List<PointF>();
+
+        foreach (var expected in expectedCorners)
+        {
+            using var region = new HRegion();
+            region.GenRectangle1(
+                expected.Y - searchHalf,
+                expected.X - searchHalf,
+                expected.Y + searchHalf,
+                expected.X + searchHalf);
+
+            using var reduced = sceneImage.ReduceDomain(region);
+
+            _trainer.FineModel.FindShapeModel(
+                reduced,
+                -_config.AngleSearchRangeRad,
+                _config.AngleSearchRangeRad,
+                0.0,
+                1,
+                _config.FineMinScore,
+                "least_squares",
+                0,
+                _config.FineMinScore,
+                out HTuple cRow,
+                out HTuple cCol,
+                out HTuple _,
+                out HTuple cScore);
+
+            if (cScore.Length > 0)
+            {
+                finalCorners.Add(new PointF((float)cCol.D, (float)cRow.D));
+                fineScores.Add(cScore.D);
+            }
+            else
+            {
+                finalCorners.Add(expected);
+                fineScores.Add(0);
+            }
+        }
+
+        result.Corners = OrderCorners(finalCorners).ToArray();
+        result.FineScores = fineScores;
+        result.Transform = mat;
+        return result;
+    }
+
+    private List<PointF> OrderCorners(List<PointF> centers)
+    {
+        var ordered = centers.OrderBy(p => p.Y).ThenBy(p => p.X).ToList();
+        if (ordered.Count != 4) return ordered;
+        return new List<PointF>
+        {
+            ordered[0],
+            ordered[1],
+            ordered[3],
+            ordered[2]
+        };
+    }
+}
+
+public class TemplateMatchResult
+{
+    public PointF[] Corners { get; set; } = Array.Empty<PointF>();
+    public HHomMat2D? Transform { get; set; }
+    public double CoarseScore { get; set; }
+    public List<double> FineScores { get; set; } = new();
 }

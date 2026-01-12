@@ -77,6 +77,9 @@ namespace LaserCuttingDetector.ViewModels
         private RuntimeLocator _runtimeLocator;
         private CadTemplateConfig _cadTemplateConfig;
         private string _generatedCadTemplatePath;
+        private string _generatedBacklitTemplatePath;
+        private PlcService _plcService;
+        private int _previousPlcStatus;
 
         // 定义一个常量用于控制选中项的放大倍数
         private const double DefaultZoomFactor = 2.5;
@@ -635,12 +638,22 @@ namespace LaserCuttingDetector.ViewModels
             ".bmp", ".jpg", ".jpeg", ".png", ".tiff", ".tif"
         ];
 
+        private Bitmap NormalizeBitmapForScanMode(Bitmap source, bool useBacklight)
+        {
+            if (!useBacklight) return (Bitmap)source.Clone();
+
+            using var mat = source.ToMat();
+            Cv2.Flip(mat, mat, FlipMode.X);
+            Cv2.BitwiseNot(mat, mat);
+            return mat.ToBitmap();
+        }
+
         /// <summary>
         /// 本地执行模板定位 + 视觉检测。
         /// </summary>
         private async Task ProcessLocalBitmapAsync(Bitmap analysisBitmap)
         {
-            await Task.Run(() =>
+            await Task.Run(async () =>
             {
                 if (_imageInspector == null || _runtimeLocator == null)
                 {
@@ -654,14 +667,19 @@ namespace LaserCuttingDetector.ViewModels
 
                 using (analysisBitmap)
                 {
-                    // 1. 使用 Halcon 模板匹配定位四角
+                    var scanMode = await (_plcService?.ReadScanModeAsync() ?? Task.FromResult<int?>(0)) ?? 0;
+                    var useBacklight = scanMode == 1;
+                    _imageInspector.SetScanMode(useBacklight);
+
+                    using var normalizedBitmap = NormalizeBitmapForScanMode(analysisBitmap, useBacklight);
+
                     string tempPath = Path.GetTempFileName() + ".png";
-                    analysisBitmap.Save(tempPath, ImageFormat.Png);
+                    normalizedBitmap.Save(tempPath, ImageFormat.Png);
                     using var hImage = new HImage(tempPath);
                     File.Delete(tempPath);
 
-                    var match = _runtimeLocator.Locate(hImage);
-                    if (match.Corners.Length < 4)
+                    var matchResult = _runtimeLocator.Locate(hImage, useBacklight);
+                    if (matchResult.Corners.Length < 4)
                     {
                         Application.Current.Dispatcher.Invoke(() =>
                         {
@@ -670,10 +688,9 @@ namespace LaserCuttingDetector.ViewModels
                         return;
                     }
 
-                    // 2. 执行本地检测
-                    using var sourceMat = analysisBitmap.ToMat();
-                    var cornerPoints = match.Corners.Select(p => new Point2f(p.X, p.Y)).ToArray();
-                    var localInspectionResult = _imageInspector.Run(sourceMat, cornerPoints);
+                    using var sourceMat = normalizedBitmap.ToMat();
+                    var cornerPoints = matchResult.Corners.Select(p => new Point2f(p.X, p.Y)).ToArray();
+                    var localInspectionResult = _imageInspector.Run(sourceMat, cornerPoints, useBacklight);
 
                     var bridgeDefectsToAdd = localInspectionResult?.DetectedBridges
                         .Where(b => "F".Equals(b.Result, StringComparison.OrdinalIgnoreCase))
@@ -701,6 +718,17 @@ namespace LaserCuttingDetector.ViewModels
                         .Where(i => "F".Equals(i.Result, StringComparison.OrdinalIgnoreCase))
                         .ToList() ?? new List<IndentationResult>();
 
+                    var transmissionNg = localInspectionResult?.LightTransmissionResults
+                        .Where(t => "F".Equals(t.IsTransmitted, StringComparison.OrdinalIgnoreCase))
+                        .ToList() ?? new List<LightTransmissionResult>();
+
+                    var currentStatusCode = EvaluateStatusCode(localInspectionResult);
+                    if (_plcService != null && _plcService.IsConnected)
+                    {
+                        await _plcService.ReportDetectionAsync(currentStatusCode, _previousPlcStatus);
+                        _previousPlcStatus = currentStatusCode;
+                    }
+
                     var displayImage = (Bitmap)localInspectionResult.AlignedImage.ToBitmap().Clone();
 
                     Application.Current.Dispatcher.Invoke(() =>
@@ -725,17 +753,18 @@ namespace LaserCuttingDetector.ViewModels
                         foreach (var component in componentDefectsToAdd) MisalignmentDefects.Add(component);
                         foreach (var indentation in indentationDefectsToAdd) IndentationDefects.Add(indentation);
 
-                        var fineScoreText = string.Join(", ", match.FineScores.Select(score => score.ToString("F2")));
+                        var fineScoreText = string.Join(", ", matchResult.FineScores.Select(score => score.ToString("F2")));
 
                         string report = $"检测完成!\n" +
                                         $"------ 模板匹配 ------\n" +
-                                        $"粗定位得分: {match.CoarseScore:F2}\n" +
+                                        $"粗定位得分: {matchResult.CoarseScore:F2}\n" +
                                         $"精定位得分: {fineScoreText}\n" +
                                         $"------ 客户端检测结果 ------\n" +
                                         $"桥位缺陷: {bridgeDefectsToAdd.Count} 处\n" +
                                         $"宽度缺陷: {widthDefectsToAdd.Count} 段\n" +
                                         $"错位缺陷: {componentDefectsToAdd.Count} 处\n" +
-                                        $"压痕缺陷: {indentationDefectsToAdd.Count} 处";
+                                        $"压痕缺陷: {indentationDefectsToAdd.Count} 处\n" +
+                                        $"不透光采样点: {transmissionNg.Count} 处";
 
                         MessageBoxService.ShowMessage(report, "检测报告");
                         LogManager.Instance.Info("视觉检测流程全部完成（本地）。");
@@ -805,6 +834,7 @@ namespace LaserCuttingDetector.ViewModels
             string configPath = Path.Combine(productPath, "config.json");
             string cadCsvPath = Path.Combine(productPath, "cad_data.csv");
             _generatedCadTemplatePath = Path.Combine(productPath, "cad_template_generated.png");
+            _generatedBacklitTemplatePath = Path.Combine(productPath, "cad_template_backlit.png");
 
             if (!File.Exists(cadCsvPath))
             {
@@ -856,14 +886,57 @@ namespace LaserCuttingDetector.ViewModels
                 CanvasMarginMm = (float)_currentConfig.CuttingFrame
             };
             _cadTemplateTrainer = new CadTemplateTrainer(_cadTemplateConfig);
-            _cadTemplateTrainer.GenerateTemplates(cadCsvPath, _generatedCadTemplatePath);
+            _cadTemplateTrainer.GenerateTemplates(cadCsvPath, _generatedCadTemplatePath, _generatedBacklitTemplatePath);
             _runtimeLocator = new RuntimeLocator(_cadTemplateTrainer, _cadTemplateConfig);
 
             // 初始化图像检测库
             _imageInspector = new ImageInspectionLibrary();
-            _imageInspector.Init(configPath, cadCsvPath, _generatedCadTemplatePath);
+            _imageInspector.Init(configPath, cadCsvPath, _generatedCadTemplatePath, _generatedBacklitTemplatePath);
             LogManager.Instance.Info($"产品 '{name}' 的图像检测库初始化成功，并已生成定位模板。");
             _originImage = new Bitmap(_generatedCadTemplatePath);
+
+            await EnsurePlcConnectionAsync();
+        }
+
+        private async Task EnsurePlcConnectionAsync()
+        {
+            try
+            {
+                _plcService ??= new PlcService("192.168.1.101", 502, 1);
+                if (!_plcService.IsConnected)
+                {
+                    if (await _plcService.ConnectAsync())
+                    {
+                        _plcService.StartHeartbeat();
+                        LogManager.Instance.Info("PLC 通讯已建立并启动心跳。");
+                    }
+                    else
+                    {
+                        LogManager.Instance.Error("PLC 连接失败，请检查网络或参数设置。");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.Error($"PLC 连接异常: {ex.Message}");
+            }
+        }
+
+        private int EvaluateStatusCode(InspectionResult result)
+        {
+            if (result == null) return _previousPlcStatus;
+
+            if (result.LightTransmissionResults.Any(r => "F".Equals(r.IsTransmitted, StringComparison.OrdinalIgnoreCase)))
+                return 3;
+            if (result.DetectedBridges.Any(b => "F".Equals(b.Result, StringComparison.OrdinalIgnoreCase)))
+                return 2;
+            if (result.AggregatedWidthDefects.Any())
+                return 1;
+            if (result.WidthSampleResults.Any(w => !w.IsValid))
+                return 4;
+            if (result.DetectedComponents.Any(c => "F".Equals(c.Result, StringComparison.OrdinalIgnoreCase)))
+                return 5;
+            return 0;
         }
 
 

@@ -16,7 +16,10 @@ namespace VisionLibrary
         private DataParser? _dataParser;
         private ComponentDetector? _componentDetector;
         private BridgeDetector? _bridgeDetector;
+        private LightTransmissionDetector? _lightTransmissionDetector;
         private Mat? _cadTemplateImage;
+        private Mat? _cadBacklitTemplateImage;
+        private Mat? _activeCadTemplateImage;
 
         private bool _isInitialized;
         private bool _disposed;
@@ -36,7 +39,7 @@ namespace VisionLibrary
             }
         }
 
-        public void Init(string configPath, string cadDataPath, string cadTemplateImagePath)
+        public void Init(string configPath, string cadDataPath, string cadTemplateImagePath, string? cadBacklitTemplateImagePath = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ImageInspectionLibrary));
             if (_isInitialized) return;
@@ -49,6 +52,11 @@ namespace VisionLibrary
 
             if (!File.Exists(cadTemplateImagePath)) throw new FileNotFoundException("CAD模板图像未找到", cadTemplateImagePath);
             _cadTemplateImage = new Mat(cadTemplateImagePath, ImreadModes.Color);
+            _activeCadTemplateImage = _cadTemplateImage;
+            if (!string.IsNullOrEmpty(cadBacklitTemplateImagePath) && File.Exists(cadBacklitTemplateImagePath))
+            {
+                _cadBacklitTemplateImage = new Mat(cadBacklitTemplateImagePath, ImreadModes.Color);
+            }
 
             _dataParser = new DataParser(_config);
             if (!_dataParser.LoadRawCadData(cadDataPath))
@@ -58,6 +66,7 @@ namespace VisionLibrary
 
             _componentDetector = new ComponentDetector(_config);
             _bridgeDetector = new BridgeDetector(_config);
+            _lightTransmissionDetector = new LightTransmissionDetector(_config, new CoordinateConverter(_config));
 
             _isInitialized = true;
         }
@@ -69,17 +78,17 @@ namespace VisionLibrary
         /// <param name="cornerPoints"></param>
         /// <returns></returns>
         /// <exception cref="InvalidOperationException"></exception>
-        public InspectionResult Run(Mat image, Point2f[] cornerPoints)
+        public InspectionResult Run(Mat image, Point2f[] cornerPoints, bool evaluateTransmission = false)
         {
             if (!_isInitialized || _disposed) throw new InvalidOperationException("库未初始化或已被释放。");
 
             var stopwatch = Stopwatch.StartNew();
             var finalResult = new InspectionResult();
 
-            using Mat alignedImage = ImageAligner.ExecuteAlignmentPipeline(image, _cadTemplateImage!, cornerPoints, _config);
+            using Mat alignedImage = ImageAligner.ExecuteAlignmentPipeline(image, _activeCadTemplateImage ?? _cadTemplateImage!, cornerPoints, _config);
             finalResult.AlignedImage = alignedImage.Clone();
 
-            ProcessImage(alignedImage, finalResult);
+            ProcessImage(alignedImage, finalResult, evaluateTransmission);
 
             stopwatch.Stop();
             finalResult.ProcessTimeSeconds = stopwatch.Elapsed.TotalSeconds;
@@ -87,14 +96,14 @@ namespace VisionLibrary
             return finalResult;
         }
 
-        public InspectionResult Run(Mat alignedImage)
+        public InspectionResult Run(Mat alignedImage, bool evaluateTransmission = false)
         {
             if (!_isInitialized || _disposed) throw new InvalidOperationException("库未初始化或已被释放。");
 
             var stopwatch = Stopwatch.StartNew();
             var finalResult = new InspectionResult();
 
-            ProcessImage(alignedImage, finalResult);
+            ProcessImage(alignedImage, finalResult, evaluateTransmission);
 
             stopwatch.Stop();
             finalResult.ProcessTimeSeconds = stopwatch.Elapsed.TotalSeconds;
@@ -102,7 +111,15 @@ namespace VisionLibrary
             return finalResult;
         }
 
-        private void ProcessImage(Mat sourceImage, InspectionResult resultContainer)
+        public void SetScanMode(bool useBacklitTemplate)
+        {
+            if (_disposed || !_isInitialized) return;
+            _activeCadTemplateImage = useBacklitTemplate && _cadBacklitTemplateImage != null
+                ? _cadBacklitTemplateImage
+                : _cadTemplateImage;
+        }
+
+        private void ProcessImage(Mat sourceImage, InspectionResult resultContainer, bool evaluateTransmission)
         {
             using var grayImage = new Mat();
             if (sourceImage.Channels() == 3) Cv2.CvtColor(sourceImage, grayImage, ColorConversionCodes.BGR2GRAY);
@@ -166,13 +183,17 @@ namespace VisionLibrary
                 var widthDetector = new WidthDetector(_config, converter);
                 return widthDetector.Detect(binaryImage, widthCad);
             });
+            var transmissionTask = evaluateTransmission
+                ? Task.Run(() => _lightTransmissionDetector!.Detect(grayImage, allCad))
+                : Task.FromResult(new List<LightTransmissionResult>());
 
-            Task.WaitAll(componentTask, bridgeTask, widthTask);
+            Task.WaitAll(componentTask, bridgeTask, widthTask, transmissionTask);
 
             resultContainer.DetectedComponents = componentTask.Result;
             resultContainer.DetectedBridges = bridgeTask.Result;
             resultContainer.WidthSampleResults = widthTask.Result;
             resultContainer.AggregatedWidthDefects = AggregateWidthDefects(resultContainer.WidthSampleResults);
+            resultContainer.LightTransmissionResults = transmissionTask.Result;
         }
 
         private List<AggregatedWidthDefect> AggregateWidthDefects(List<WidthSampleResult> allSamples)
@@ -251,6 +272,8 @@ namespace VisionLibrary
                 if (disposing)
                 {
                     _cadTemplateImage?.Dispose();
+                    _cadBacklitTemplateImage?.Dispose();
+                    _activeCadTemplateImage = null;
                 }
                 _isInitialized = false;
                 _disposed = true;

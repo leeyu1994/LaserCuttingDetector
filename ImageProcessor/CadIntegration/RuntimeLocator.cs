@@ -20,14 +20,13 @@ public class RuntimeLocator
     /// <summary>
     /// 对真实图片进行定位，返回四角坐标（顺序：左上、右上、右下、左下）。
     /// </summary>
-    public TemplateMatchResult Locate(HImage sceneImage)
+    public TemplateMatchResult Locate(HImage sceneImage, bool useBacklight = false)
     {
-        if (_trainer.CoarseModel is null || _trainer.FineModel is null)
-            throw new InvalidOperationException("请先调用 CadTemplateTrainer.GenerateTemplates 生成模板。");
+        var modelSet = _trainer.GetModelSet(useBacklight);
 
         var result = new TemplateMatchResult();
 
-        _trainer.CoarseModel.FindShapeModel(
+        modelSet.Coarse.FindShapeModel(
             sceneImage,
             -_config.AngleSearchRangeRad,
             _config.AngleSearchRangeRad,
@@ -51,14 +50,14 @@ public class RuntimeLocator
 
         var mat = new HHomMat2D();
         mat.VectorAngleToRigid(
-            new HTuple(_trainer.ImageCenter.Y),
-            new HTuple(_trainer.ImageCenter.X),
+            new HTuple(modelSet.Center.Y),
+            new HTuple(modelSet.Center.X),
             new HTuple(0.0),
             row,
             col,
             angle);
 
-        var expectedCorners = _trainer.TheoreticalCorners
+        var expectedCorners = modelSet.Corners
             .Select(corner =>
             {
                 HTuple r = mat.AffineTransPoint2d(corner.Y, corner.X, out HTuple c);
@@ -83,7 +82,7 @@ public class RuntimeLocator
 
             using var reduced = sceneImage.ReduceDomain(region);
 
-            _trainer.FineModel.FindShapeModel(
+            modelSet.Fine.FindShapeModel(
                 reduced,
                 -_config.AngleSearchRangeRad,
                 _config.AngleSearchRangeRad,
